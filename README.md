@@ -77,6 +77,75 @@ valbot_tui.bat
 
 That's it! The TUI will launch with a beautiful interface ready for your AI conversations.
 
+#### Setting Up the `valbot` Alias Manually
+
+To use the `valbot` command from anywhere, you can set up an alias manually:
+
+**Windows (PowerShell):**
+
+Add to your PowerShell profile (`$PROFILE`):
+```powershell
+# Open your profile for editing
+notepad $PROFILE
+
+# Add this line (replace with your actual path):
+function valbot { & "C:\path\to\valbot-cli-main\valbot_tui.bat" $args }
+```
+
+After saving, reload your profile:
+```powershell
+. $PROFILE
+```
+
+**Windows (Command Prompt):**
+
+Create a batch file named `valbot.bat` in a directory that's in your PATH (e.g., `C:\Windows\System32` or a custom bin directory):
+```cmd
+@echo off
+"C:\path\to\valbot-cli-main\valbot_tui.bat" %*
+```
+
+**Linux/macOS (Bash):**
+
+Add to your `~/.bashrc` or `~/.bash_profile`:
+```bash
+# Add this line (replace with your actual path):
+alias valbot="/path/to/valbot-cli-main/valbot_tui.sh"
+```
+
+Then reload your shell configuration:
+```bash
+source ~/.bashrc
+```
+
+**Linux/macOS (Zsh):**
+
+Add to your `~/.zshrc`:
+```bash
+# Add this line (replace with your actual path):
+alias valbot="/path/to/valbot-cli-main/valbot_tui.sh"
+```
+
+Then reload your shell configuration:
+```bash
+source ~/.zshrc
+```
+
+**Linux/macOS (tcsh/csh):**
+
+Add to your `~/.tcshrc` or `~/.cshrc`:
+```tcsh
+# Add this line (replace with your actual path):
+alias valbot "/path/to/valbot-cli-main/valbot_tui.sh"
+```
+
+Then reload your shell configuration:
+```tcsh
+source ~/.tcshrc
+```
+
+**Note:** If you used the automated setup scripts (`setup.bat` or `ec_linux_setup.sh`), the alias should already be configured for you.
+
 ### Automated Setup Scripts (Alternative)
 
 For a fully automated setup with virtual environment creation and configuration, use the included scripts:

@@ -1,0 +1,406 @@
+#!/usr/bin/env bash
+# ==============================================================================
+#  ValBot CLI - EC Linux Interactive Setup
+# ------------------------------------------------------------------------------
+#  This script walks you through setting up ValBot CLI on Intel EC Linux.
+#  It will:
+#    - Detect or let you choose a Python 3.10+ interpreter (EC default shown)
+#    - Use an existing virtual environment or create a new one
+#    - Activate the venv and install requirements (with optional proxy)
+#    - Prompt for your VALBOT_CLI_KEY
+#    - Generate convenient launcher scripts:
+#         - valbot.sh (bash/zsh)
+#         - valbot.csh (tcsh)
+#    - Optionally write a .env file with VALBOT_CLI_KEY
+#
+#  Notes from README (EC specifics):
+#    - EC users cannot install Python packages globally; a venv is required
+#    - Typical EC Python path: /usr/intel/pkgs/python3/3.12.3/bin/python3
+#    - Typical proxy: http://proxy-chain.intel.com:911
+# ------------------------------------------------------------------------------
+#  Usage:
+#     chmod +x ec_linux_setup.sh
+#     ./ec_linux_setup.sh
+# ==============================================================================
+
+set -Eeuo pipefail
+
+# --- Colors ---
+if [[ -t 1 ]]; then
+  BOLD='\e[1m'; RED='\e[31m'; GREEN='\e[32m'; YELLOW='\e[33m'; BLUE='\e[34m'; NC='\e[0m'
+else
+  BOLD=''; RED=''; GREEN=''; YELLOW=''; BLUE=''; NC=''
+fi
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
+REQ_FILE="$PROJECT_ROOT/requirements.txt"
+
+MIN_MAJOR=3
+MIN_MINOR=10
+
+say() { echo -e "$1"; }
+ok()  { say "${GREEN}✔${NC} $1"; }
+warn(){ say "${YELLOW}⚠${NC} $1"; }
+err() { say "${RED}✖${NC} $1"; }
+
+default_read() {
+  # $1 prompt, $2 default -> sets REPLY
+  local prompt="$1"; local def_val="${2-}"
+  if [[ -n "${def_val}" ]]; then
+    read -r -p "$prompt [$def_val]: " REPLY
+    REPLY=${REPLY:-$def_val}
+  else
+    read -r -p "$prompt: " REPLY
+  fi
+}
+
+confirm() {
+  # $1 prompt, default Y
+  local prompt="$1"
+  read -r -p "$prompt [Y/n]: " ans || true
+  case "${ans:-Y}" in
+    [Yy]*) return 0 ;;
+    *)     return 1 ;;
+  esac
+}
+
+check_python_version() {
+  local py="$1"
+  if ! command -v "$py" >/dev/null 2>&1; then
+    return 1
+  fi
+  local ver
+  ver="$($py -c 'import sys; print("%d.%d.%d"%sys.version_info[:3])' 2>/dev/null || true)"
+  if [[ -z "$ver" ]]; then
+    return 1
+  fi
+  local maj min
+  maj="${ver%%.*}"
+  min="${ver#*.}"; min="${min%%.*}"
+  if (( maj > MIN_MAJOR )) || { (( maj == MIN_MAJOR )) && (( min >= MIN_MINOR )); }; then
+    echo "$ver"
+    return 0
+  fi
+  return 2
+}
+
+pick_python() {
+  say "${BOLD}Step 1:${NC} Select Python interpreter (needs ${MIN_MAJOR}.${MIN_MINOR}+)."
+  local ec_default="/usr/intel/pkgs/python3/3.12.3/bin/python3"
+  local candidates=()
+  [[ -x "$ec_default" ]] && candidates+=("$ec_default")
+  command -v python3 >/dev/null 2>&1 && candidates+=("$(command -v python3)")
+  command -v python >/dev/null 2>&1 && candidates+=("$(command -v python)")
+  candidates=($(printf "%s\n" "${candidates[@]}" | awk '!x[$0]++'))
+
+  local chosen="" ver=""
+  for c in "${candidates[@]}"; do
+    if ver=$(check_python_version "$c"); then
+      chosen="$c"; break
+    fi
+  done
+
+  if [[ -z "$chosen" ]]; then
+    warn "No suitable Python ${MIN_MAJOR}.${MIN_MINOR}+ auto-detected."
+    while true; do
+      default_read "Enter path to Python ${MIN_MAJOR}.${MIN_MINOR}+ interpreter" "$ec_default"
+      local try="$REPLY"
+      if ver=$(check_python_version "$try"); then
+        chosen="$try"; break
+      else
+        err "'$try' is not a valid Python ${MIN_MAJOR}.${MIN_MINOR}+ interpreter. Try again."
+      fi
+    done
+  fi
+  ok "Using Python at: $chosen (version $ver)"
+  PYTHON_BIN="$chosen"
+}
+
+choose_or_create_venv() {
+  say "
+${BOLD}Step 2:${NC} Create a new virtual environment or use an existing one. (Default: create new)"
+  if confirm "Create a new virtual environment now?"; then
+    local create_new="yes"
+    local reuse_existing="no"
+    while true; do
+      default_read "Enter a path where we should create the venv" "$PROJECT_ROOT/valbot-venv"
+      local p="$REPLY"
+      if [[ -e "$p" && ! -d "$p" ]]; then
+        err "Path exists and is not a directory: $p"
+        continue
+      fi
+      if [[ -d "$p" && "$(ls -A "$p" 2>/dev/null | wc -l)" != "0" ]]; then
+        say "Directory '$p' exists and is not empty."
+        while true; do
+          read -r -p "How would you like to proceed? [U]se as is, [D]elete and create new, or [C]hoose a different path [u/d/c]: " action
+          case "${action,,}" in
+            u)
+              if [[ -f "$p/bin/activate" || -f "$p/bin/activate.csh" ]]; then
+                VENV_PATH="$p"
+                reuse_existing="yes"
+                create_new="no"
+                ok "Using existing venv: $VENV_PATH"
+                break 2
+              else
+                warn "No activate script found under '$p/bin'. This may not be a Python virtual environment."
+                if confirm "Continue anyway and use this directory as is?"; then
+                  VENV_PATH="$p"
+                  reuse_existing="yes"
+                  create_new="no"
+                  break 2
+                else
+                  continue
+                fi
+              fi
+              ;;
+            d)
+              read -r -p "Really delete '$p' and create a new venv here? This will remove ALL contents. [y/N]: " ans
+              case "${ans:-N}" in
+                [Yy]*)
+                  rm -rf "$p"
+                  VENV_PATH="$p"
+                  create_new="yes"
+                  reuse_existing="no"
+                  break
+                  ;;
+                *)
+                  continue
+                  ;;
+              esac
+              ;;
+            c)
+              continue
+              ;;
+            *)
+              warn "Please enter 'u' (use), 'd' (delete and create new), or 'c' (choose a different path)."
+              ;;
+          esac
+        done
+      else
+        VENV_PATH="$p"
+        create_new="yes"
+        reuse_existing="no"
+        break
+      fi
+    done
+    if [[ "$create_new" == "yes" ]]; then
+      say "Creating virtual environment at: $VENV_PATH"
+      "$PYTHON_BIN" -m venv "$VENV_PATH"
+      ok "Virtual environment created."
+    else
+      ok "Skipping creation; will use existing directory as venv: $VENV_PATH"
+    fi
+  else
+    while true; do
+      default_read "Enter existing venv path" "$PROJECT_ROOT/valbot-venv"
+      local p="$REPLY"
+      if [[ -f "$p/bin/activate" || -f "$p/bin/activate.csh" ]]; then
+        VENV_PATH="$p"
+        ok "Using existing venv: $VENV_PATH"
+        break
+      else
+        err "No activate script found under '$p/bin'. Please provide a valid venv path."
+      fi
+    done
+  fi
+}
+
+pip_install_requirements() {
+  say "
+${BOLD}Step 3:${NC} Install Python requirements into the venv."
+  if [[ ! -f "$REQ_FILE" ]]; then
+    err "requirements.txt not found at $REQ_FILE"
+    say "Make sure you run this from the project root where requirements.txt exists."
+    exit 1
+  fi
+
+  local pip_bin="$VENV_PATH/bin/pip"
+  if [[ ! -x "$pip_bin" ]]; then
+    err "pip not found in venv: $pip_bin"
+    exit 1
+  fi
+
+  # Ask about proxy BEFORE upgrading pip so the upgrade also uses the proxy
+  local use_proxy="no" proxy_url="http://proxy-chain.intel.com:911"
+  if confirm "Are you behind the EC proxy and want to use it for pip installs?"; then
+    use_proxy="yes"
+    default_read "Enter proxy URL" "$proxy_url"
+    proxy_url="$REPLY"
+    # Export common proxy env vars for completeness
+    export HTTP_PROXY="$proxy_url" HTTPS_PROXY="$proxy_url" \
+           http_proxy="$proxy_url" https_proxy="$proxy_url"
+  fi
+
+  say "Upgrading pip..."
+  if [[ "$use_proxy" == "yes" ]]; then
+    "$VENV_PATH/bin/python" -m pip install --proxy="$proxy_url" --upgrade pip
+  else
+    "$VENV_PATH/bin/python" -m pip install --upgrade pip
+  fi
+
+  say "Installing requirements..."
+  if [[ "$use_proxy" == "yes" ]]; then
+    "$pip_bin" install --proxy="$proxy_url" -r "$REQ_FILE" --disable-pip-version-check --upgrade
+  else
+    "$pip_bin" install -r "$REQ_FILE" --disable-pip-version-check --upgrade
+  fi
+  ok "Requirements installed."
+}
+
+collect_key_and_env() {
+  say "\n${BOLD}Step 4:${NC} Configure your VALBOT_CLI_KEY."
+  say "Visit https://genai-proxy.intel.com/ -> Manage Your API Tokens to create a token."
+
+  local key=""
+  local existing_key=""
+
+  # Check if .env file exists and try to extract the key
+  if [[ -f "$PROJECT_ROOT/.env" ]]; then
+    existing_key=$(grep -E '^VALBOT_CLI_KEY=' "$PROJECT_ROOT/.env" 2>/dev/null | cut -d'=' -f2- | tr -d '\n' || true)
+    if [[ -n "$existing_key" && "$existing_key" != "your_valbot_cli_key_here" ]]; then
+      say "Found existing .env file with VALBOT_CLI_KEY."
+      if confirm "Use the existing key from .env file?"; then
+        VALBOT_CLI_KEY_VAL="$existing_key"
+        ok "Using existing key from .env file."
+        return
+      else
+        say "You can enter a new key below."
+      fi
+    fi
+  fi
+
+  default_read "Enter your VALBOT_CLI_KEY (leave blank to set a placeholder)" ""
+  key="$REPLY"
+  VALBOT_CLI_KEY_VAL="${key:-your_valbot_cli_key_here}"
+
+  if confirm "Also write this value to a .env file in the project root?"; then
+    printf 'VALBOT_CLI_KEY=%s\n' "$VALBOT_CLI_KEY_VAL" > "$PROJECT_ROOT/.env"
+    ok ".env created at $PROJECT_ROOT/.env"
+  else
+    warn "Skipping .env creation. Runner scripts will still export VALBOT_CLI_KEY."
+  fi
+}
+
+write_runner_scripts() {
+  say "
+${BOLD}Step 5:${NC} Create convenience launcher scripts."
+  local bash_runner="$PROJECT_ROOT/valbot.sh"
+  local csh_runner="$PROJECT_ROOT/valbot.csh"
+
+  if [[ -f "$bash_runner" ]] && ! confirm "Overwrite existing $bash_runner?"; then
+    warn "Skipping $bash_runner"
+  else
+    cat > "$bash_runner" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+VENV_PATH="__VENV_PATH__"
+VALBOT_PATH="__VALBOT_PATH__"
+# If you prefer to read from .env instead, comment the next line and uncomment the .env block below
+export VALBOT_CLI_KEY="__VALBOT_CLI_KEY__"
+
+# Optional: Read from .env if present (commented by default)
+# if [[ -f "$VALBOT_PATH/.env" ]]; then
+#   set -a; source "$VALBOT_PATH/.env"; set +a
+# fi
+
+source "$VENV_PATH/bin/activate"
+python "$VALBOT_PATH/app.py" "$@"
+deactivate
+EOF
+    # Replace placeholders safely
+    sed -i "s|__VENV_PATH__|$VENV_PATH|g" "$bash_runner"
+    sed -i "s|__VALBOT_PATH__|$PROJECT_ROOT|g" "$bash_runner"
+    sed -i "s|__VALBOT_CLI_KEY__|$VALBOT_CLI_KEY_VAL|g" "$bash_runner"
+    chmod +x "$bash_runner"
+    ok "Wrote $bash_runner"
+  fi
+
+  if [[ -f "$csh_runner" ]] && ! confirm "Overwrite existing $csh_runner?"; then
+    warn "Skipping $csh_runner"
+  else
+    cat > "$csh_runner" <<'EOF'
+#!/bin/tcsh
+onerr exit
+set VENV_PATH="__VENV_PATH__"
+set VALBOT_PATH="__VALBOT_PATH__"
+# If you prefer .env, comment next line and read from file
+setenv VALBOT_CLI_KEY "__VALBOT_CLI_KEY__"
+
+source "$VENV_PATH/bin/activate.csh"
+python "$VALBOT_PATH/app.py" $argv
+# deactivate is defined by virtualenv for csh
+deactivate
+EOF
+    # Replace placeholders safely
+    sed -i "s|__VENV_PATH__|$VENV_PATH|g" "$csh_runner"
+    sed -i "s|__VALBOT_PATH__|$PROJECT_ROOT|g" "$csh_runner"
+    sed -i "s|__VALBOT_CLI_KEY__|$VALBOT_CLI_KEY_VAL|g" "$csh_runner"
+    chmod +x "$csh_runner"
+    ok "Wrote $csh_runner"
+  fi
+
+  say "
+You can create an alias for convenience (add to your shell rc file):"
+  say "  - Bash/Zsh: alias valbot=\"$bash_runner\""
+  say "  - tcsh:     alias valbot \"$csh_runner\""
+}
+
+add_aliases_file() {
+  say "
+${BOLD}Step 6:${NC} Optional: add an alias to run valbot.sh from anywhere."
+  local aliases_file="$HOME/.aliases"
+  local bash_runner="$PROJECT_ROOT/valbot.sh"
+  if [[ -f "$aliases_file" ]]; then
+    if confirm "Detected $aliases_file. Add alias 'valbot' pointing to $bash_runner?"; then
+      if grep -q 'alias valbot ' "$aliases_file"; then
+        warn "Alias 'valbot' already exists in $aliases_file. It will be overridden."
+        sed -i '/alias valbot /d' "$aliases_file"
+      fi
+      {
+        echo ""
+        echo "# ValBot CLI alias added by ec_linux_setup.sh on $(date)"
+        echo "alias valbot \"$bash_runner\""
+      } >> "$aliases_file"
+      ok "Alias added to $aliases_file"
+      say "Run: source \"$aliases_file\" or open a new shell to use 'valbot'."
+    else
+      warn "Skipping alias creation in $aliases_file."
+      say "You can add it manually later with:"
+      say "  echo 'alias valbot=\"$bash_runner\"' >> $aliases_file"
+    fi
+  else
+    warn "No $aliases_file found."
+    say "You can still create an alias manually in your shell configuration, for example:"
+    say "  - Bash/Zsh: echo 'alias valbot=\"$bash_runner\"' >> ~/.bashrc  # or ~/.zshrc"
+    say "  - tcsh:     echo 'alias valbot \"$PROJECT_ROOT/valbot.csh\"' >> ~/.tcshrc  # or ~/.cshrc"
+  fi
+}
+
+final_notes() {
+  say "
+${BOLD}Setup Complete!${NC}"
+  say "How to run ValBot CLI:"
+  say "  - Bash/Zsh: $PROJECT_ROOT/valbot.sh \"Hello\""
+  say "  - tcsh:     $PROJECT_ROOT/valbot.csh \"Hello\""
+  say "
+Extra tips:"
+  say "  - To adjust models/endpoints, edit ~/.valbot_config.json as per README."
+  say "  - To use EC proxy later for pip: pip install --proxy=\"http://proxy-chain.intel.com:911\" -r requirements.txt"
+}
+
+main() {
+  say "${BOLD}========================================${NC}"
+  say "${BOLD}      ValBot CLI - EC Linux Setup      ${NC}"
+  say "${BOLD}========================================${NC}\n"
+
+  pick_python
+  choose_or_create_venv
+  pip_install_requirements
+  collect_key_and_env
+  write_runner_scripts
+  add_aliases_file
+  final_notes
+}
+
+main "$@"

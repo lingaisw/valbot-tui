@@ -1,0 +1,70 @@
+{
+  "general": {
+    "ascii_banner_size": "small",
+    "display_commands_on_startup": true
+  },
+  "cloud_settings": {
+    "conversation_sync_enabled": false,
+    "display_conversation_id": false
+  },
+  "agent_model_config": {
+    "default_endpoint": "valbot-proxy",
+    "default_model": "gpt-4.1",
+    "small_model": "gpt-5-mini"
+  },
+  "chat_model_config": {
+    "default_endpoint": "valbot-proxy",
+    "default_model": "gpt-5",
+    "system_prompt": "You are a helpful assistant. Use markdown when applicable. Avoid using emojis.",
+    "display_reasoning": false,
+    "reasoning_effort": "low"
+  },
+  "default_agents":[
+    { 
+      "name": "PDL Expert",
+      "description": "Q&A with PDL Expert",
+      "location": "./agent_plugins/agents/pdl_agent.py"
+    },
+    {
+      "name": "Spec Expert",
+      "description": "Q&A with Spec Expert",
+      "location": "./agent_plugins/agents/spec_expert_agent.py"
+    },
+    {
+      "name": "File Edit",
+      "description": "Edit files with Agent assistance",
+      "location": "./agent_plugins/agents/file_edit_agent.py"
+    },
+    {
+      "name": "File Creator",
+      "description": "Create files with Agent assistance",
+      "location": "./agent_plugins/agents/new_file.py"
+    },
+    {
+      "name": "Terminal",
+      "description": "Use agents to run terminal commands",
+      "location": "./agent_plugins/agents/terminal_agent.py"
+    },
+    {
+      "name": "Repo Index",
+      "description": "Use agents to summarize and index the repo context to a .REPO_INDEX.md file",
+      "location": "./agent_plugins/agents/repo_index_agent.py"
+    },
+    {
+      "name": "Project",
+      "description": "Use agents to make changes/add features to the project",
+      "location": "./agent_plugins/agents/project_agent.py"
+    }
+  ],
+  "agent_extensions": [],
+  "custom_agent_commands" : [],
+  "custom_prompts": [
+    {
+      "prompt_cmd": "jarvis",
+      "description": "Reply as a Jarvis - the helpful bulter.",
+      "prompt": "Reply as a bulter, always formal. To this request: {request}",
+      "args": ["request"]
+    }
+  ]
+}
+

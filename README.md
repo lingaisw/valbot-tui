@@ -1,20 +1,21 @@
-# ValBot-CLI
+# ValBot TUI
 
 ## Overview
 
-ValBot-CLI is a powerful, extensible AI assistant with both a modern Terminal User Interface (TUI) and traditional command-line interface. ValBot combines conversational AI with autonomous agent workflows to help you code, debug, analyze specifications, and automate complex tasks—all from your terminal.
+ValBot TUI is a powerful, extensible AI assistant with a beautiful Terminal User Interface built with Textual. ValBot combines conversational AI with autonomous agent workflows to help you code, debug, analyze specifications, and automate complex tasks—all through an intuitive visual interface.
 
 **Key Capabilities:**
 
-- **🎨 Modern TUI Interface**: Beautiful Material Design interface with real-time streaming, syntax highlighting, integrated terminal, file explorer, and markdown rendering
-- **💬 Interactive Chat**: Real-time AI conversation with context-aware responses, multiline input, and rich formatting
+- **🎨 Modern Material Design Interface**: Beautiful dark theme with gradient accents, real-time streaming, syntax highlighting, integrated terminal, file explorer, and full markdown rendering
+- **💬 Interactive Chat**: Real-time AI conversation with streaming responses, context-aware replies, multiline input, and rich formatting
 - **🤖 Autonomous Agents**: Pre-built and custom agents that can execute multi-step workflows, use tools, and interact with files, git, terminals, and more
 - **🔌 Extensible Plugin System**: Add custom agents from local files or Git repositories, create your own agents, and share them with others
 - **⚙️ Flexible Configuration**: Customize models, prompts, commands, and agent behaviors to match your workflow
 - **🔄 Built-in Updates**: Keep ValBot and installed plugins up to date with the `/update` command
 - **📝 Context Management**: Load conversation context from files to give the AI deep understanding of your codebase
+- **⌨️ Keyboard-Driven Workflow**: Extensive keyboard shortcuts and command palette for efficient navigation
 
-Whether you're asking quick questions, analyzing complex specifications, or running sophisticated agent workflows, ValBot adapts to your needs with both a beautiful visual TUI and powerful CLI interface.
+Whether you're asking quick questions, analyzing complex specifications, or running sophisticated agent workflows, ValBot provides an intuitive visual interface that makes AI-assisted development a joy.
 
 ![image](https://github.com/user-attachments/assets/10b07c71-3fb4-40c9-a8eb-2a26366cefb4)
 
@@ -29,240 +30,267 @@ https://github.com/user-attachments/assets/f82c59b6-c8d4-4296-9223-01dc5b5f87ba
 ### Requirements
 
 - Python 3.11+
+- Modern terminal emulator (Windows Terminal, iTerm2, GNOME Terminal, or Alacritty recommended)
+- Terminal with 256-color or true color support
 
-### Quick Setup Scripts (Recommended)
+### Quick Installation
 
-Prefer an automated setup? Use the included scripts for Windows or Intel EC Linux to create a virtual environment, install requirements, and configure your VALBOT_CLI_KEY.
+**1. Clone the repository:**
+```bash
+git clone https://github.com/intel-innersource/applications.ai.valbot-cli valbot-cli
+cd valbot-cli
+```
+
+**2. Install dependencies:**
+```bash
+pip install -r requirements.txt
+```
+
+For Linux EC with proxy:
+```bash
+pip install --proxy="http://proxy-chain.intel.com:911" -r requirements.txt
+```
+
+**3. Configure your API key:**
+
+Create a `.env` file in the repository root:
+```bash
+VALBOT_CLI_KEY=your_api_key_here
+```
+
+Or set it in your environment:
+```bash
+export VALBOT_CLI_KEY="your_api_key_here"
+```
+
+Get your API key at: https://genai-proxy.intel.com/ → "Manage Your API Tokens" → "Create New Token"
+
+**4. Launch ValBot TUI:**
+
+**Windows:**
+```cmd
+valbot_tui.bat
+```
+
+**Linux/macOS:**
+```bash
+chmod +x valbot_tui.sh
+./valbot_tui.sh
+```
+
+That's it! The TUI will launch with a beautiful interface ready for your AI conversations.
+
+### Automated Setup Scripts (Alternative)
+
+For a fully automated setup with virtual environment creation and configuration, use the included scripts:
 
 #### Windows: setup.bat
 
-- How to run:
-  - Open Command Prompt or PowerShell in the repository root and run:
-    ```bat
-    .\setup.bat
-    ```
-  - Or double-click `setup.bat` in File Explorer.
+```bat
+.\setup.bat
+```
 
-- What it does:
-  - Verifies Python 3.10+ is available.
-  - Ensures a `.env` file exists and optionally prompts for `VALBOT_CLI_KEY`.
-  - Creates a fresh `venv` directory (removes an existing one if present).
-  - Upgrades `pip` and installs requirements from `requirements.txt`.
-  - Builds a standalone `valbot.exe` with PyInstaller and copies it to `%USERPROFILE%\bin`.
-
-- After it finishes:
-  - If `%USERPROFILE%\bin` is on your PATH, you can run ValBot from anywhere:
-    ```bat
-    valbot "Hello"
-    ```
-  - From the repo root, you can also use the helper batch script with examples:
-    ```bat
-    .\valbot.bat "Your message here"
-    .\valbot.bat -m "Your message" -c file1.txt file2.txt
-    .\valbot.bat -a agent_name -p param1=value1 param2=value2
-    .\valbot.bat --config your_config.json "Your message"
-    ```
-  - You can update `VALBOT_CLI_KEY` later by editing the `.env` file created in the repo root if you used a placeholder.
+This will:
+- Create a virtual environment
+- Install all dependencies
+- Prompt for your API key
+- Build a standalone executable (optional)
 
 #### Intel EC Linux: ec_linux_setup.sh
 
-- How to run:
-  - Make the script executable and launch it from the repository root:
-    ```bash
-    chmod +x ec_linux_setup.sh
-    ./ec_linux_setup.sh
-    ```
-
-- What it does (interactive):
-  - Lets you select a Python 3.10+ interpreter (suggests the EC default).
-  - Creates a new virtual environment or reuses an existing one.
-  - Installs requirements (optionally using the EC proxy: `http://proxy-chain.intel.com:911`).
-  - Prompts for your `VALBOT_CLI_KEY` and can write it to a `.env` in the project root.
-  - Generates runner scripts: `valbot.sh` (bash/zsh) and `valbot.csh` (tcsh).
-  - Optionally appends an alias `valbot` to `~/.aliases`.
-
-- After it finishes:
-  - Run via the generated script:
-    ```bash
-    ./valbot.sh "Hello"
-    ```
-  - Or, if you added the alias:
-    ```bash
-    valbot -m "Analyze this code" -c myfile.py
-    ```
-
-- Where to get `VALBOT_CLI_KEY`:
-  - Visit https://genai-proxy.intel.com/ and choose "Manage Your API Tokens" to create a token.
-
-### Manual Installation
-
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/intel-innersource/applications.ai.valbot-cli valbot-cli
-   cd valbot-cli
-   ```
-
-2. **Install Python packages**:
-
-    - Note: It is recommended to setup a python virtual env as to not conflict with your personal python package requirements. [Python venv documentation](https://docs.python.org/3/library/venv.html). For EC, setting up a virtual env is a requirement, as you can not install packages directly.
-         - quick refrence for setting up a python venv in EC:
-           ```tcsh
-               setenv VENV_PATH /path/to/create/your/valbot-venv
-               /usr/intel/pkgs/python3/3.11.1/bin/python3 -m venv $VENV_PATH
-               source $VENV_PATH/bin/activate.csh
-           ```
-
-    - After your venv is setup and activated, you can now pip install the required python packages:
-   ```bash
-   pip3 install -r requirements.txt
-   # On Linux EC specify with proxy:
-   pip3 install --proxy="http://proxy-chain.intel.com:911" -r path/to/requirements.txt
-   ```
-
-### Endpoint Setup
-
-There are 3 endpoints supported, you must setup at least 1 of these:
-
-#### Valbot proxy endpoint (*Recommended*)
-
-Steps to get API Key:
-
-  - Navigate to: [https://genai-proxy.intel.com/](https://genai-proxy.intel.com/) and login with your intel credentials.
-  - Click `Manage Your API Tokens` > `Create New Token` > Fill in details > `Create Token`
-
-Steps to configure Valbot to use this endpoint:
-  - Copy this token and set it in your env as `VALBOT_CLI_KEY` (see below bash script for BKM on making valbot invocation easier)
-  - Configure your ~/.valbot_config.json file to use the "valbot-proxy" endpoint. Place this somewhere in your config file:
-    ```json
-      {
-      <...>
-      "agent_model_config": {
-          "default_endpoint": "valbot-proxy",
-          "default_model": "gpt-4.1",
-          "small_model": "gpt-4.1-mini"
-      },
-      "chat_model_config": {
-          "default_endpoint": "valbot-proxy",
-          "default_model": "gpt-5"
-      },
-      <...>
-      }
-    ```
-
-#### AZURE Endpoint
-  <TBD>
-
-
-#### ~~IGPT (Deprecated)~~
-
-~~Steps to get API Key~~:
-  - ~~See instructions at: [https://wiki.ith.intel.com/spaces/GenAI/pages/3590613857/Using+the+Inference+API](https://wiki.ith.intel.com/spaces/GenAI/pages/3590613857/Using+the+Inference+API)~~
-
-~~Steps to configure Valbot to use this endpoint:~~
-  - ~~Set the igpt client id and secret as `CLIENT_ID` and `CLIENT_SECRET` in your env~~
-  - ~~Configure your ~/.valbot_config.json file to use the "igpt" endpoint. Place this somewhere in your config file:
-    Note: igpt only supports `gpt-4o`model~~
-    ```json
-      {
-      <...>
-      "agent_model_config": {
-          "default_endpoint": "igpt",
-          "default_model": "gpt-4o",
-          "small_model": "gpt-4o"
-      },
-      "chat_model_config": {
-          "default_endpoint": "igpt",
-          "default_model": "gpt-4o"
-      },
-      <...>
-      }
-    ```
-
-### Quick Start Helper Script
-
-For easier usage, you can create a helper script and alias:
-
 ```bash
-#!/bin/bash
-VENV_PATH=/path/to/your/valbot-venv
-VALBOT_PATH=/path/to/your/cloned/valbot-cli
-source "$VENV_PATH/bin/activate"
-export VALBOT_CLI_KEY="<YOUR VALBOT_CLI_KEY>"
-python $VALBOT_PATH/app.py "$@"
-deactivate
+chmod +x ec_linux_setup.sh
+./ec_linux_setup.sh
 ```
 
-```bash
-# Add to your .aliases file
-alias valbot '~/scripts/valbot.sh'
+This will:
+- Let you select Python interpreter
+- Create virtual environment
+- Install dependencies with proxy support
+- Generate launcher scripts
+- Set up aliases
+
+### Virtual Environment Setup (Recommended)
+
+Using a virtual environment prevents package conflicts:
+
+**Create and activate virtual environment:**
+
+**Windows:**
+```cmd
+python -m venv venv
+venv\Scripts\activate
 ```
+
+**Linux/macOS:**
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+**Intel EC (tcsh):**
+```tcsh
+setenv VENV_PATH /path/to/create/your/valbot-venv
+/usr/intel/pkgs/python3/3.11.1/bin/python3 -m venv $VENV_PATH
+source $VENV_PATH/bin/activate.csh
+```
+
+Then install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+### Configuration
+
+#### API Key Setup
+
+Get your API key from https://genai-proxy.intel.com/:
+1. Login with your Intel credentials
+2. Click "Manage Your API Tokens"
+3. Create New Token
+4. Copy the token
+
+Set the key in your environment or `.env` file:
+```bash
+VALBOT_CLI_KEY=your_api_key_here
+```
+
+#### Model Configuration (Optional)
+
+Configure your preferred models in `~/.valbot_config.json`:
+
+```json
+{
+  "agent_model_config": {
+    "default_endpoint": "valbot-proxy",
+    "default_model": "gpt-4.1",
+    "small_model": "gpt-4.1-mini"
+  },
+  "chat_model_config": {
+    "default_endpoint": "valbot-proxy",
+    "default_model": "gpt-5"
+  }
+}
+```
+
+**Available Models:**
+- `gpt-5` - Latest reasoning model (recommended for chat)
+- `gpt-4.1` - Powerful general model (recommended for agents)
+- `gpt-4.1-mini` - Faster, lightweight model
+- `gpt-5-mini` - Compact reasoning model
+- `gpt-oss:20b` - Open source model option
 
 ---
 
-## ValBot TUI (Terminal User Interface) - Recommended
+## ValBot TUI - Your AI Assistant Interface
 
 ValBot's primary interface is a beautiful, feature-rich Terminal User Interface (TUI) built with Textual. The TUI provides a modern visual experience with real-time streaming, integrated tools, and an intuitive layout—making it the best way to interact with ValBot.
 
 ### Why Use the TUI?
 
-- **Visual and Intuitive**: Beautiful Material Design interface with clear message organization
-- **Integrated Tools**: Built-in terminal and file explorer eliminate context switching
-- **Enhanced Productivity**: Keyboard shortcuts, autocomplete, and visual feedback streamline your workflow
-- **Better Visualization**: Syntax-highlighted code blocks with copy buttons, markdown rendering, and organized layout
-- **Same Power**: Full feature parity with CLI mode—all commands, agents, and capabilities available
+- **Visual and Intuitive**: Beautiful Material Design interface with real-time message streaming, clear message organization, and instant visual feedback
+- **Intelligent Autocomplete**: Smart command and file path autocomplete with fuzzy matching—type `/` for command suggestions or start typing file paths for automatic completion
+- **Integrated Tools**: Built-in terminal panel and interactive file explorer eliminate context switching—execute commands and browse files without leaving the chat
+- **Enhanced Productivity**: Extensive keyboard shortcuts, multi-line input support, command history, and session management streamline your workflow
+- **Superior Code Experience**: Syntax-highlighted code blocks with one-click copy buttons, full markdown rendering with tables/lists/quotes, and collapsible sections
+- **Customizable Interface**: Multiple theme support with Material Design colors, adjustable panel layouts, and personalized keyboard bindings
+- **Real-Time Streaming**: Watch AI responses appear token-by-token with progress indicators, reasoning display for GPT-5 models, and live agent status updates
+- **Same Power**: Full feature parity with CLI mode—all commands, agents, and capabilities available with better visualization
 
 ### TUI Features
 
 🎨 **Modern Material Design Interface**
-- Beautiful dark theme with gradient accents (customizable)
-- Smooth animations and responsive layout
-- Real-time message streaming with progress indicators
+- Beautiful dark theme with gradient accents (ValBot Dark theme built-in)
+- Customizable color themes via Textual theme system
+- Smooth animations and responsive layout that adapts to terminal size
+- Real-time message streaming with token-by-token display
 - Syntax-highlighted code blocks with one-click copy buttons
-- Full markdown rendering with tables, lists, quotes, and emphasis
-- Collapsible sections for better organization
+- Full markdown rendering with tables, lists, quotes, emphasis, and links
+- Collapsible sections for better organization of long responses
+- Clean, distraction-free interface with optional panel toggling
 
 💬 **Interactive Chat Experience**
-- Real-time AI conversation with streaming responses
-- Message history with clear user/assistant differentiation
-- Multi-line input support via system editor
-- Reasoning display for GPT-5 models (when `display_reasoning` enabled)
-- Visual feedback on loaded files and context
-- Configurable reasoning effort levels (low/medium/high)
-- Response streaming with proper event handling
+- **Real-time streaming**: Watch AI responses appear character-by-character as they're generated
+- **Message organization**: Clear visual differentiation between user and assistant messages with timestamps
+- **Multi-line input**: Built-in TextArea widget with auto-expanding height (3-10 lines)
+- **Command autocomplete**: Type `/` to see smart suggestions for all available commands with descriptions
+- **File path autocomplete**: Automatic path completion with fuzzy matching as you type file paths
+- **Reasoning display**: Shows GPT-5 thinking process in dedicated panel when `display_reasoning` enabled
+- **Visual feedback**: Loading animations, progress indicators, and status messages for all operations
+- **Configurable reasoning**: Set effort levels (low/medium/high) for AI reasoning depth
+- **Response streaming**: Proper event handling with ResponseAudioDeltaEvent and ResponseTextDeltaEvent
+- **Session management**: Save and load chat sessions (in development)
+- **Message history**: Scroll through complete conversation history with syntax preservation
 
-🖥️ **Integrated Terminal**
-- Execute shell commands directly in the TUI with `/terminal`
-- Real-time output streaming in dedicated panel
-- Directory navigation and environment management
-- Command history and error handling
-- Toggle visibility with `Ctrl+T` to maximize workspace
+🖥️ **Integrated Terminal Panel**
+- **Execute commands directly**: Run any shell command with `/terminal` without leaving the chat
+- **Real-time output streaming**: See command output appear instantly as it's generated
+- **Dedicated terminal panel**: Separate, toggleable panel that doesn't interfere with chat
+- **Directory navigation**: Full support for `cd` and environment changes that persist
+- **Error handling**: Clear display of stdout, stderr, and return codes
+- **Command history**: Access previously executed terminal commands
+- **Toggle with hotkey**: Press `Ctrl+T` to show/hide terminal panel and maximize workspace
+- **Background execution**: Terminal panel updates while you continue chatting
 
 📁 **File System Integration**
-- Built-in file explorer with interactive directory tree view
-- Load files into conversation context with visual feedback
-- File content preview with syntax highlighting
-- Support for glob patterns and multiple files
-- Toggle file explorer with `Ctrl+F`
+- **Interactive file explorer**: Built-in DirectoryTree widget with expandable folders
+- **File path autocomplete**: Smart autocomplete with fuzzy matching for file paths in commands
+- **Direct file loading**: Click any file in explorer to load into conversation context
+- **Glob pattern support**: Use patterns like `src/**/*.py` to load multiple files at once
+- **Visual feedback**: See loaded files confirmed in chat with file count and syntax preview
+- **Syntax highlighting**: Automatic language detection and highlighting for file content
+- **File content preview**: View file contents in formatted panels before loading
+- **Toggle with hotkey**: Press `Ctrl+F` to show/hide file explorer panel
+- **Current directory aware**: File explorer starts at your working directory
 
-⌨️ **Keyboard Shortcuts**
-- `Ctrl+Q` - Quit application
-- `Ctrl+C` or `Ctrl+N` - Clear chat history / New conversation
-- `Ctrl+T` - Toggle terminal panel
-- `Ctrl+F` - Toggle file explorer
-- `Ctrl+M` - Change AI model (interactive picker)
-- `Ctrl+A` - Agent picker (interactive selection)
-- `Ctrl+S` - Save session (when implemented)
-- `Esc` - Cancel current operation/close pickers
+⌨️ **Keyboard Shortcuts & Navigation**
+- **`Ctrl+Q`** - Quit application gracefully
+- **`Ctrl+C` or `Ctrl+N`** - Clear chat history and start new conversation
+- **`Ctrl+T`** - Toggle terminal panel visibility
+- **`Ctrl+F`** - Toggle file explorer panel visibility
+- **`Ctrl+M`** - Open interactive model picker with arrow key navigation
+- **`Ctrl+A`** - Open interactive agent picker with descriptions
+- **`Ctrl+S`** - Save current session (when implemented)
+- **`Esc`** - Cancel current operation, close pickers, or dismiss overlays
+- **`Enter`** - Submit message or confirm selection
+- **Arrow keys** - Navigate through autocomplete suggestions and pickers
+- **Tab** - Accept autocomplete suggestion (when available)
+
+🎯 **Smart Autocomplete System**
+- **Command autocomplete**: Type `/` to see all available commands with live filtering
+- **File path autocomplete**: Smart completion for file paths with fuzzy matching
+  - Works in `/context`, `/file`, and any command accepting file paths
+  - Shows up to 20 matching files as you type
+  - Supports relative and absolute paths
+  - Filters based on partial matches
+- **Fuzzy matching**: Find commands even with typos or partial names
+- **Context-aware**: Autocomplete adapts based on what you're typing
+- **Visual overlay**: Floating autocomplete panel with syntax highlighting
+- **Keyboard navigation**: Use arrow keys to select, Enter to accept, Esc to dismiss
 
 ✅ **Complete Feature Parity with CLI**
 - **All slash commands**: `/clear`, `/new`, `/help`, `/quit`, `/model`, `/agent`, `/context`, `/file`, `/terminal`, `/multi`, `/prompts`, `/commands`, `/settings`, `/reload`, `/update`, `/add_agent`, `/add_tool`
-- **CommandManager integration**: Full support for custom prompts with argument parsing
+- **CommandManager integration**: Full support for custom prompts with argument parsing and validation
 - **Custom commands**: From agent plugins with automatic delegation to plugin manager
-- **Agent system**: Interactive agent picker with arrow navigation, descriptions, and full workflow execution
-- **Context management**: Complete ContextManager integration with visual feedback
-- **System prompt**: Automatically loads `system_prompt` from config on startup
-- **GPT-5 reasoning**: Displays thinking process with configurable effort levels
+- **Agent system**: Interactive agent picker with arrow navigation, full descriptions, and real-time workflow execution
+- **Context management**: Complete ContextManager integration with visual confirmation and file previews
+- **System prompt**: Automatically loads `system_prompt` from config on startup for consistent behavior
+- **GPT-5 reasoning**: Displays thinking process with configurable effort levels in dedicated panel
 - **Tool integration**: All common tools (ask_human, file_tools, git_tools, github_tools, terminal_tools, hsd_tools)
+- **Rich text output**: Handles Rich markup for colored output from agents and tools
+- **Code block copy**: One-click copy buttons on all code blocks with success feedback
+
+🎨 **Advanced UI Features**
+- **Copy buttons**: Hover over any code block to see copy button with click feedback
+- **Syntax highlighting**: Automatic language detection for 50+ programming languages
+- **Markdown tables**: Full support for tables with proper formatting and borders
+- **Live updates**: UI updates in real-time as AI generates responses
+- **Panel management**: Resize, show/hide panels without losing state
+- **Scroll preservation**: Smart scrolling keeps new content visible while allowing manual scroll
+- **Error display**: Beautiful error messages with clear formatting and context
+- **Welcome message**: Informative welcome screen with quick start tips
+- **Status bar**: Live status indicators showing model, session state, and connection status
+- **Loading animations**: Smooth loading indicators with animated messages
 
 ### Installing TUI Dependencies
 
@@ -334,77 +362,118 @@ python app.py --tui
 
 ### TUI Slash Commands
 
-All CLI commands are fully supported in the TUI with enhanced visual feedback:
+All CLI commands are fully supported in the TUI with enhanced visual feedback and intelligent autocomplete:
+
+**🔍 Smart Autocomplete Features:**
+- **Command autocomplete**: Type `/` to see all available commands with live filtering
+- **File path autocomplete**: Start typing file paths and see smart suggestions appear automatically
+  - Works in `/context`, `/file`, and any command that accepts paths
+  - Fuzzy matching finds files even with partial names
+  - Shows up to 20 matching results with full paths
+  - Use arrow keys to navigate, Enter to select, Esc to dismiss
+- **Interactive pickers**: For `/model` and `/agent`, use arrow keys to browse options visually
+- **Tab completion**: Press Tab to accept the top suggestion (when available)
 
 **Chat Commands:**
 - `/clear` or `/new` - Clear conversation history and start fresh
+  - Keyboard shortcut: `Ctrl+C` or `Ctrl+N`
+  - Confirms before clearing to prevent accidental loss
 - `/help` - Show comprehensive help with all available commands
+  - Displays command list with descriptions and usage examples
 - `/quit` or `/exit` - Exit the application gracefully
+  - Keyboard shortcut: `Ctrl+Q`
 
 **Model & Agent Commands:**
 - `/model` - Interactive model picker with arrow key navigation
+  - Keyboard shortcut: `Ctrl+M`
   - Shows available models from your configured endpoints
-  - Displays current model and allows switching
-  - Visual confirmation of model change
+  - Displays current model with visual indicator
+  - Arrow keys to navigate, Enter to select
+  - Visual confirmation of model change with success message
 - `/agent` - Interactive agent selection with descriptions
-  - Browse all available agents with descriptions
+  - Keyboard shortcut: `Ctrl+A`
+  - Browse all available agents with full descriptions
   - Shows agent names, descriptions, and required arguments
-  - Execute agent workflows with full context
-  - Error handling and status reporting
+  - Execute agent workflows with full context and real-time status
+  - Error handling with clear error messages and retry options
+  - Watch agent progress with live updates
 
 **File & Context Commands:**
-- `/context <files>` - Load files into conversation context
+- `/context <files>` - Load files into conversation context with autocomplete
+  - **File path autocomplete**: Start typing and see suggestions appear
   - Supports single files: `/context myfile.py`
-  - Supports glob patterns: `/context src/**/*.py`
-  - Supports multiple files: `/context file1.py file2.js`
-  - Visual feedback showing loaded files
+  - Supports glob patterns: `/context src/**/*.py` or `/context *.{js,ts}`
+  - Supports multiple files: `/context file1.py file2.js README.md`
+  - Visual feedback showing loaded files with count and size
   - File content preview with syntax highlighting
-- `/file <path>` - Display file contents with syntax highlighting
-  - Shows file in a formatted panel
-  - Automatic language detection
+  - Shows which files were successfully loaded vs skipped
+- `/file <path>` - Display file contents with syntax highlighting and autocomplete
+  - **File path autocomplete** helps you find files quickly
+  - Shows file in a beautifully formatted panel
+  - Automatic language detection for 50+ languages
   - Syntax highlighting for better readability
+  - Line numbers and file metadata displayed
 
 **Terminal Commands:**
-- `/terminal <command>` - Execute shell commands in integrated terminal
-  - Real-time output streaming in terminal panel
-  - Support for any shell command
-  - Error output clearly displayed
-  - Panel toggles automatically when needed
+- `/terminal <command>` - Execute shell commands in integrated terminal panel
+  - Real-time output streaming with instant feedback
+  - Support for any shell command (bash, PowerShell, cmd)
+  - Error output clearly displayed with color coding
+  - Panel toggles automatically when command is run
+  - Toggle panel visibility with `Ctrl+T`
+  - Supports directory changes (`cd`) that persist
+  - Environment variables maintained across commands
+  - Command history accessible via terminal panel
 
 **Advanced Commands:**
 - `/multi` - Multi-line input via system editor
-  - Opens your default system editor (vim, nano, notepad, etc.)
-  - Allows composing complex multi-line prompts
-  - Preserves formatting and indentation
+  - Opens your default system editor (vim, nano, notepad, VS Code, etc.)
+  - Allows composing complex multi-line prompts with full formatting
+  - Preserves indentation, code blocks, and markdown
+  - Automatically detects default editor from environment
+  - Falls back to TextArea for long input if editor fails
 - `/prompts` - Show custom prompts from config
-  - Lists all available custom prompts
-  - Shows descriptions and required arguments
+  - Lists all available custom prompts with descriptions
+  - Shows required arguments for each prompt
   - Invoke with `/prompt_name [args]`
+  - Example: `/jarvis "Hello there"`
+  - Autocomplete suggests available custom prompts
 - `/commands` - Show all available commands
   - Lists slash commands, custom commands, and agent commands
-  - Shows descriptions and usage
+  - Shows descriptions, usage, and examples
   - Includes both built-in and plugin commands
-- `/settings` - Display current settings
-  - Shows model configuration
-  - Displays endpoint information
-  - Shows system prompt status
-- `/reload` - Reinitialize chatbot
-  - Reloads configuration from files
+  - Organized by category for easy navigation
+- `/settings` - Display current settings and configuration
+  - Shows model configuration with endpoint details
+  - Displays endpoint information and API status
+  - Shows system prompt status and length
+  - Lists loaded plugins and extensions
+  - Configuration file paths displayed
+- `/reload` - Reinitialize chatbot and reload configuration
+  - Reloads configuration from default_config.json and ~/.valbot_config.json
   - Refreshes agent and tool plugins
-  - Useful after editing config files
+  - Resets conversation history
+  - Useful after editing config files or adding plugins
+  - Shows confirmation of what was reloaded
 - `/update` - Check for and install updates
-  - Checks main app and plugin updates
-  - Shows version/commit information
-  - Interactive update selection
+  - Checks main app for new tagged releases
+  - Checks plugins for updates (branch-based only)
+  - Shows current and latest version/commit information
+  - Warns if dependencies changed
+  - Interactive update selection with visual confirmation
+  - Automatic reload after successful update
 - `/add_agent` - Add new agent from Git repo or local path
-  - Interactive prompts for agent details
+  - Interactive prompts for agent details with validation
   - Supports local and GitHub sources
   - Automatic tool dependency installation
+  - Reads registry.json from GitHub repos
   - Saves to `~/.valbot_config.json`
+  - Shows confirmation and next steps
 - `/add_tool` - Add new tool extension
-  - Similar to `/add_agent` for tools
+  - Similar workflow to `/add_agent`
   - Local and remote sources supported
   - Integrates with plugin system
+  - Automatic installation and configuration
 
 ### TUI Interface Layout
 
@@ -418,12 +487,13 @@ All CLI commands are fully supported in the TUI with enhanced visual feedback:
 │   │ You: How do I...              │     │                       │
 │   └───────────────────────────────┘     │   📁 src/             │
 │   ┌───────────────────────────────┐     │     📄 app.py         │
-│   │ Assistant:                     │     │     📄 config.py      │
+│   │ Assistant: ▊                  │     │     📄 config.py      │
 │   │ Here's how...                 │     │   📁 tests/           │
-│   │                               │     │     📄 test_app.py    │
-│   │ ```python                     │     │                       │
-│   │ def example():      [Copy]    │     │                       │
-│   │     return True               │     │                       │
+│   │ (streaming in real-time)      │     │     📄 test_app.py    │
+│   │                               │     │   � docs/            │
+│   │ ```python                     │     │     📄 README.md      │
+│   │ def example():      [📋 Copy] │     │                       │
+│   │     return True               │     │   (Click to open)     │
 │   │ ```                           │     │                       │
 │   └───────────────────────────────┘     │                       │
 ├─────────────────────────────────────────┴───────────────────────┤
@@ -431,16 +501,31 @@ All CLI commands are fully supported in the TUI with enhanced visual feedback:
 │         Terminal Panel (Toggle: Ctrl+T)                         │
 │   $ python --version                                            │
 │   Python 3.11.0                                                 │
-│   $                                                             │
+│   $ _                                                           │
+│   (Live command output)                                         │
 │                                                                 │
 ├─────────────────────────────────────────────────────────────────┤
-│ > Type your message or /command... ▊                            │
+│ > /cont▊                           ┌──────────────────────┐    │
+│                                    │ 📁 /context          │    │
+│                                    │ ⚙️  /commands        │    │
+│                                    │ 📄 /config.py        │    │
+│                                    │ (Autocomplete: ↑↓)   │    │
+│                                    └──────────────────────┘    │
 ├─────────────────────────────────────────────────────────────────┤
-│ Model: gpt-4o | Session: active | Ready                        │
+│ Model: gpt-4o | Session: active | Ready | [Ctrl+M] [Ctrl+A]   │
 └─────────────────────────────────────────────────────────────────┘
 │ Ctrl+Q Quit | Ctrl+M Model | Ctrl+A Agent | Ctrl+F Files       │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+**Key TUI Interface Features:**
+- **Real-time streaming**: See AI responses appear token-by-token with cursor indicator (▊)
+- **Copy buttons**: Click [📋 Copy] on any code block for instant clipboard copy
+- **Autocomplete overlay**: Shows matching commands/files as you type with ↑↓ navigation
+- **Interactive panels**: File explorer and terminal toggle with keyboard shortcuts
+- **Syntax highlighting**: Code blocks automatically detected and colorized for 50+ languages
+- **Material Design theme**: Smooth animations, gradients, and polished visual elements
+- **Status bar**: Shows current model, session state, and quick access shortcuts
 
 ### TUI Usage Examples
 
@@ -590,158 +675,58 @@ python3.11 valbot_tui_launcher.py
 
 ---
 
-## CLI Mode (Command Line Interface)
+---
 
-ValBot's traditional CLI mode provides a powerful text-based REPL for AI interaction.
+## CLI Mode (Alternative Text Interface)
 
-### CLI Chat and Prompts
+For users who prefer a traditional command-line REPL interface, ValBot can also run in CLI mode without the TUI.
 
-ValBot provides an interactive chat interface for real-time AI interaction with rich text formatting.
+### Running CLI Mode
 
-#### Basic Usage
-
-Run the ChatBot with optional initial message and context files:
+**Basic usage:**
 ```bash
-python app.py -m "Hello, AI!" -c context1.txt context2.txt
+python app.py
 ```
 
-With the helper script/alias:
+**With initial message:**
 ```bash
-valbot "How do I list all files in a directory using Linux commands?"
-valbot -m "Analyze this code" -c myfile.py
+python app.py -m "Your question here"
+python app.py "Your question here"  # Positional argument
 ```
 
-#### Interactive Commands
-
-The following commands are available during a chat session:
-
-- **/prompts**: Display available prompts with their descriptions and arguments.
-- **/commands**: Display available slash commands with their descriptions.
-- **/clear**: Clear the conversation history.
-- **/quit** (or **/exit**): Exit the chat.
-- **/context**: Load more context from a file or list of files.
-- **/help**: Chat with the help bot.
-- **/settings**: Display and modify settings.
-- **/multi**: Handle multiline input.
-- **/agent**: Select an agentic flow.
-- **/model**: Model picker.
-- **/add_agent**: Add a new agent from a Git repo or local path (updates `~/.valbot_config.json`).
-- **/add_tool**: Add a new tool extension from a Git repo or local path (updates `~/.valbot_config.json`).
-- **/reload**: Restart the application to reload configuration.
-- **/update**: Check for updates to the main app and installed plugins.
-
-#### Custom Prompts
-
-Custom prompts allow you to define reusable prompt templates for specific interactions. Define them in your `~/.valbot_config.json`:
-
-```json
-{
-  "custom_prompts": [
-    {
-      "prompt_cmd": "jarvis",
-      "description": "Reply as a Jarvis - the helpful butler.",
-      "prompt": "Reply as a butler, always formal. To this request: {request}",
-      "args": ["request"]
-    },
-    {
-      "prompt_cmd": "motivate",
-      "description": "Provide a motivational quote.",
-      "prompt": "Share a motivational quote to inspire the user.",
-      "args": []
-    }
-  ]
-}
-```
-
-Use the `/prompts` command during a chat to see available custom prompts.
-
-#### Command-Line Arguments for Chat
-
-- **Positional Message**: You can provide an initial message directly as a positional argument.
-- **`-m`, `--message`**: Initial message for the AI.
-- **`-c`, `--context`**: Files to load context from.
-
-#### Chat Usage Examples
-
-- **No initial message or context**:
-  ```bash
-  python app.py
-  # or with alias:
-  valbot
-  ```
-
-- **With initial message**:
-  ```bash
-  python app.py -m "How do I list all files in a directory using Linux commands?"
-  # or with alias:
-  valbot "How do I list all files in a directory using Linux commands?"
-  ```
-
-- **With context files**:
-  ```bash
-  python app.py -c intro.txt history.txt
-  # or with alias:
-  valbot -c intro.txt history.txt
-  ```
-
-### CLI Agents
-
-Agents are autonomous workflows that can perform complex tasks using tools and multi-step reasoning. ValBot comes with built-in agents and supports custom agent extensions.
-
-#### What Are Agents?
-
-Agents are AI-powered assistants that can:
-- Use tools to interact with files, git, terminals, and more
-- Follow multi-step workflows to accomplish complex tasks
-- Ask for human input when needed
-- Return structured results
-
-Think of agents as specialized AI workers that can autonomously complete tasks, from answering questions about specifications to debugging code or editing files.
-
-#### Running Agents
-
-Directly invoke a specific agent on startup and pass it parameters via the command line:
+**With context files:**
 ```bash
-python app.py -a my_agent_name -p param1=value1 param2=value2
+python app.py -c file1.py file2.txt
+python app.py -m "Analyze this" -c mycode.py
 ```
 
-Where:
-- `-a`, `--agent` specifies the agent flow to invoke by name
-- `-p`, `--params` lets you pass one or more parameters to the agent as key=value pairs. Each pair should be provided as an individual argument (i.e., space-separated).
+**With agents:**
+```bash
+python app.py -a agent_name -p param1=value1 param2=value2
+```
 
-You can also select an agent interactively during a chat session using the `/agent` command.
+**With custom config:**
+```bash
+python app.py --config custom_config.json
+```
 
-#### Agent Usage Examples
+### CLI Features
 
-- **Invoke an agent with parameters**:
-  ```bash
-  python app.py -a "spec_expert" -p spec_path=specs/pmc_spec.pdf project=abcd
-  # or with alias:
-  valbot -a "spec_expert" -p spec_path=specs/pmc_spec.pdf project=abcd
-  ```
+The CLI mode supports all the same commands and features as the TUI:
+- All slash commands (`/help`, `/agent`, `/model`, `/context`, etc.)
+- Agent workflows
+- Custom prompts
+- Context management
+- Model switching
+- File operations
 
-- **Select agent interactively**:
-  ```bash
-  python app.py
-  # Then type: /agent
-  # Choose from the list of available agents
-  ```
+The main difference is the interface—CLI uses a text-based REPL while TUI provides a visual interface with panels, syntax highlighting, and keyboard shortcuts.
 
-#### Built-in Agents
-
-ValBot includes several built-in agents defined in `default_config.json`:
-- **Spec Expert**: Q&A with specification documents
-- **Code Expert**: Code analysis and generation
-- **File Edit Agent**: Edit files with AI assistance
-- **Terminal Agent**: Execute terminal commands
-- **Project Agent**: Manage project-wide tasks
-- And more...
-
-Check your `\agent` command to see all available built-in agents.
+**Note:** For the best experience with syntax highlighting, code blocks, file explorer, integrated terminal, and visual feedback, we recommend using the TUI mode.
 
 ---
 
-## Creating and Adding Custom Agents
+## Agents - Autonomous AI Workflows
 
 ### Adding Agents Interactively with `/add_agent`
 
@@ -1000,7 +985,7 @@ When you run `/update`:
 
 ### Configuration Files
 
-ValBotTerminal uses two main configuration files:
+ValBot uses two main configuration files:
 - **`default_config.json`**: Contains built-in agents (under `default_agents`), built-in commands, and custom prompts provided by the application. This file is part of the ValBot installation.
 - **`~/.valbot_config.json`**: Located in the user's home directory, this file allows users to override settings (including model and endpoint), manage agent extensions, and add custom commands and prompts.
 
@@ -1011,10 +996,8 @@ The application merges `default_config.json` and `.valbot_config.json`, with `.v
 Configure these environment variables for authentication:
 
 - **`VALBOT_CLI_KEY`**: Your API key for the Valbot proxy endpoint (recommended).
-- ~~**`CLIENT_ID`**: Your client ID for authentication~~ (deprecated IGPT endpoint).
-- ~~**`CLIENT_SECRET`**: Your client secret for authentication~~ (deprecated IGPT endpoint).
 
-These must be set in your environment to authenticate with the Intel API. If you utilize the helper scripts/alias this is handled automatically for you each time you invoke `valbot`
+Set this in your `.env` file or system environment to authenticate with the API.
 
 ### Model and Endpoint Configuration
 
@@ -1255,9 +1238,19 @@ The `PluginManager` handles loading and executing plugins based on the configura
 
 ### Command-Line Arguments Reference
 
-Complete list of command-line arguments:
+These arguments are primarily for CLI mode. For TUI mode, use the visual interface or pass `--tui` flag:
 
-- **Positional Message**: Directly provide an initial message when running the application
+```bash
+# Launch TUI mode
+python app.py --tui
+
+# Launch TUI with custom config
+python app.py --tui --config custom_config.json
+```
+
+**CLI Mode Arguments:**
+
+- **Positional Message**: Directly provide an initial message when running in CLI mode
   ```bash
   python app.py "Your message here"
   ```
@@ -1282,25 +1275,40 @@ Complete list of command-line arguments:
   python app.py -a "spec_expert" -p spec_path=/path/to/spec project=myproject
   ```
 
-- **`--config`**: Specify a custom configuration file (Windows only with valbot.bat)
+- **`--config`**: Specify a custom configuration file
   ```bash
-  valbot.bat --config custom_config.json "Your message"
+  python app.py --config custom_config.json
   ```
 
 ### Troubleshooting
+
+**TUI won't start:**
+- Ensure textual is installed: `pip install textual textual-dev`
+- Try updating textual: `pip install --upgrade textual`
+- Use a modern terminal emulator (Windows Terminal, iTerm2, etc.)
+- Check terminal size (minimum 80×24, recommended 120×40)
 
 **Agent not found:**
 - Ensure the agent is defined in either `default_config.json` or `~/.valbot_config.json`
 - Check that the agent name matches exactly (case-sensitive)
 - For remote agents, verify the repository was cloned successfully
+- Use `/agent` command in TUI to see all available agents
 
 **Authentication errors:**
-- Verify `VALBOT_CLI_KEY` is set correctly in your environment
+- Verify `VALBOT_CLI_KEY` is set correctly in your `.env` file or environment
 - Check that your API key is valid at https://genai-proxy.intel.com/
-- For IGPT (deprecated), ensure both `CLIENT_ID` and `CLIENT_SECRET` are set
+- Restart the TUI after setting the API key
 
 **Plugin loading errors:**
 - Check that the plugin file path exists and is accessible
 - Ensure the plugin file has a `.py` extension
 - Verify the plugin class inherits from `AgentPlugin`
 - Check console output for specific error messages
+- Use `/reload` command to reload plugins after changes
+
+**Display or rendering issues in TUI:**
+- Update to latest textual: `pip install --upgrade textual`
+- Try a different terminal emulator
+- Check terminal color support settings
+- Disable terminal transparency/blur effects
+- Ensure terminal supports 256 colors or true color

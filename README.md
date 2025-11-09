@@ -15,14 +15,6 @@ ValBot TUI is a powerful, extensible AI assistant with a beautiful Terminal User
 - **📝 Context Management**: Load conversation context from files to give the AI deep understanding of your codebase
 - **⌨️ Keyboard-Driven Workflow**: Extensive keyboard shortcuts and command palette for efficient navigation
 
-Whether you're asking quick questions, analyzing complex specifications, or running sophisticated agent workflows, ValBot provides an intuitive visual interface that makes AI-assisted development a joy.
-
-![image](https://github.com/user-attachments/assets/10b07c71-3fb4-40c9-a8eb-2a26366cefb4)
-
-An illustration of Valbot's capabilities in understanding and explaining multiple files within a checker framework, followed by the creation of a brand-new checker file upon the user's request.
-
-https://github.com/user-attachments/assets/f82c59b6-c8d4-4296-9223-01dc5b5f87ba
-
 ---
 
 ## Getting Started
@@ -37,8 +29,8 @@ https://github.com/user-attachments/assets/f82c59b6-c8d4-4296-9223-01dc5b5f87ba
 
 **1. Clone the repository:**
 ```bash
-git clone https://github.com/intel-innersource/applications.ai.valbot-cli valbot-cli
-cd valbot-cli
+git clone https://github.com/lingaisw/valbot-tui valbot-tui
+cd valbot-tui
 ```
 
 **2. Install dependencies:**
@@ -485,58 +477,6 @@ All CLI commands are fully supported in the TUI with enhanced visual feedback an
   - Local and remote sources supported
   - Integrates with plugin system
   - Automatic installation and configuration
-
-### TUI Interface Layout
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ 🤖 ValBot TUI - AI Assistant              🕐 14:23:45           │
-├─────────────────────────────────────────┬───────────────────────┤
-│                                         │                       │
-│         Chat Panel                      │   File Explorer       │
-│   ┌───────────────────────────────┐     │   (Toggle: Ctrl+F)    │
-│   │ You: How do I...              │     │                       │
-│   └───────────────────────────────┘     │   📁 src/             │
-│   ┌───────────────────────────────┐     │     📄 app.py         │
-│   │ Assistant: ▊                  │     │     📄 config.py      │
-│   │ Here's how...                 │     │   📁 tests/           │
-│   │ (streaming in real-time)      │     │     📄 test_app.py    │
-│   │                               │     │   � docs/            │
-│   │ ```python                     │     │     📄 README.md      │
-│   │ def example():      [📋 Copy] │     │                       │
-│   │     return True               │     │   (Click to open)     │
-│   │ ```                           │     │                       │
-│   └───────────────────────────────┘     │                       │
-├─────────────────────────────────────────┴───────────────────────┤
-│                                                                 │
-│         Terminal Panel (Toggle: Ctrl+T)                         │
-│   $ python --version                                            │
-│   Python 3.11.0                                                 │
-│   $ _                                                           │
-│   (Live command output)                                         │
-│                                                                 │
-├─────────────────────────────────────────────────────────────────┤
-│ > /cont▊                           ┌──────────────────────┐    │
-│                                    │ 📁 /context          │    │
-│                                    │ ⚙️  /commands        │    │
-│                                    │ 📄 /config.py        │    │
-│                                    │ (Autocomplete: ↑↓)   │    │
-│                                    └──────────────────────┘    │
-├─────────────────────────────────────────────────────────────────┤
-│ Model: gpt-4o | Session: active | Ready | [Ctrl+M] [Ctrl+A]   │
-└─────────────────────────────────────────────────────────────────┘
-│ Ctrl+Q Quit | Ctrl+M Model | Ctrl+A Agent | Ctrl+F Files       │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Key TUI Interface Features:**
-- **Real-time streaming**: See AI responses appear token-by-token with cursor indicator (▊)
-- **Copy buttons**: Click [📋 Copy] on any code block for instant clipboard copy
-- **Autocomplete overlay**: Shows matching commands/files as you type with ↑↓ navigation
-- **Interactive panels**: File explorer and terminal toggle with keyboard shortcuts
-- **Syntax highlighting**: Code blocks automatically detected and colorized for 50+ languages
-- **Material Design theme**: Smooth animations, gradients, and polished visual elements
-- **Status bar**: Shows current model, session state, and quick access shortcuts
 
 ### TUI Usage Examples
 

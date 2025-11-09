@@ -67,6 +67,12 @@ Get your API key at: https://genai-proxy.intel.com/ → "Manage Your API Tokens"
 
 **4. Launch ValBot TUI:**
 
+```bash
+valbot
+```
+
+Alternatively, you can use the platform-specific scripts:
+
 **Windows:**
 ```cmd
 valbot_tui.bat
@@ -74,7 +80,6 @@ valbot_tui.bat
 
 **Linux/macOS:**
 ```bash
-chmod +x valbot_tui.sh
 ./valbot_tui.sh
 ```
 
@@ -107,8 +112,8 @@ This will:
 - Let you select Python interpreter
 - Create virtual environment
 - Install dependencies with proxy support
-- Generate launcher scripts
-- Set up aliases
+- Generate launcher scripts (valbot.sh and valbot.csh that launch the TUI by default)
+- Set up aliases for convenient access to ValBot TUI
 
 ### Virtual Environment Setup (Recommended)
 
@@ -315,47 +320,53 @@ pip install --proxy="http://proxy-chain.intel.com:911" -r requirements.txt
 
 ### Running the TUI
 
-#### Windows
+**Using the valbot alias (recommended):**
+```bash
+valbot
+```
 
-**Using the provided batch file (easiest):**
+#### Alternative Launch Methods
+
+**Windows:**
+
+Using the provided batch file:
 ```cmd
 valbot_tui.bat
 ```
 
-**Using Python directly:**
+Using Python directly:
 ```cmd
 python valbot_tui_launcher.py
 ```
 
-**With custom configuration:**
+With custom configuration:
 ```cmd
 python app.py --tui --config my_config.json
 ```
 
-**From main app:**
+From main app:
 ```cmd
 python app.py --tui
 ```
 
-#### Linux/macOS
+**Linux/macOS:**
 
-**Make the launcher executable and run:**
+Using the launcher script:
 ```bash
-chmod +x valbot_tui.sh
 ./valbot_tui.sh
 ```
 
-**Using Python directly:**
+Using Python directly:
 ```bash
 python valbot_tui_launcher.py
 ```
 
-**With custom configuration:**
+With custom configuration:
 ```bash
 python app.py --tui --config my_config.json
 ```
 
-**From main app:**
+From main app:
 ```bash
 python app.py --tui
 ```
@@ -531,7 +542,7 @@ All CLI commands are fully supported in the TUI with enhanced visual feedback an
 
 **Basic Chat:**
 ```
-1. Launch TUI: valbot_tui.bat (Windows) or ./valbot_tui.sh (Linux)
+1. Launch TUI: valbot
 2. Type your message: "How do I read files in Python?"
 3. Press Enter
 4. Watch response stream in real-time with syntax highlighting
@@ -1238,10 +1249,13 @@ The `PluginManager` handles loading and executing plugins based on the configura
 
 ### Command-Line Arguments Reference
 
-These arguments are primarily for CLI mode. For TUI mode, use the visual interface or pass `--tui` flag:
+These arguments are primarily for CLI mode. For TUI mode, use the `valbot` alias or pass `--tui` flag:
 
 ```bash
-# Launch TUI mode
+# Launch TUI mode (recommended)
+valbot
+
+# Alternative: Launch TUI with Python
 python app.py --tui
 
 # Launch TUI with custom config

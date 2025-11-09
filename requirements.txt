@@ -67,7 +67,7 @@ PyJWT==2.10.1
 PyPDF2==3.0.1
 pyspnego==0.12.0
 python-dateutil==2.9.0.post0
-python-dotenv==1.1.0
+dotenv==1.1.0
 PyYAML==6.0.2
 readchar==4.2.1
 regex==2024.11.6

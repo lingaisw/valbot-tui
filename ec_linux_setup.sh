@@ -305,7 +305,7 @@ export VALBOT_CLI_KEY="__VALBOT_CLI_KEY__"
 # fi
 
 source "$VENV_PATH/bin/activate"
-python "$VALBOT_PATH/app.py" "$@"
+python "$VALBOT_PATH/valbot_tui.py" "$@"
 deactivate
 EOF
     # Replace placeholders safely
@@ -328,7 +328,7 @@ set VALBOT_PATH="__VALBOT_PATH__"
 setenv VALBOT_CLI_KEY "__VALBOT_CLI_KEY__"
 
 source "$VENV_PATH/bin/activate.csh"
-python "$VALBOT_PATH/app.py" $argv
+python "$VALBOT_PATH/valbot_tui.py" $argv
 # deactivate is defined by virtualenv for csh
 deactivate
 EOF
@@ -348,7 +348,7 @@ You can create an alias for convenience (add to your shell rc file):"
 
 add_aliases_file() {
   say "
-${BOLD}Step 6:${NC} Optional: add an alias to run valbot.sh from anywhere."
+${BOLD}Step 6:${NC} Optional: add an alias to run valbot-tui from anywhere."
   local aliases_file="$HOME/.aliases"
   local bash_runner="$PROJECT_ROOT/valbot.sh"
   if [[ -f "$aliases_file" ]]; then
@@ -380,11 +380,13 @@ ${BOLD}Step 6:${NC} Optional: add an alias to run valbot.sh from anywhere."
 final_notes() {
   say "
 ${BOLD}Setup Complete!${NC}"
-  say "How to run ValBot CLI:"
-  say "  - Bash/Zsh: $PROJECT_ROOT/valbot.sh \"Hello\""
-  say "  - tcsh:     $PROJECT_ROOT/valbot.csh \"Hello\""
+  say "How to run ValBot TUI:"
+  say "  - Bash/Zsh: $PROJECT_ROOT/valbot.sh"
+  say "  - tcsh:     $PROJECT_ROOT/valbot.csh"
+  say "  - Or use the alias 'valbot' if you added it to your shell config"
   say "
 Extra tips:"
+  say "  - The alias now launches the TUI (Text User Interface) by default"
   say "  - To adjust models/endpoints, edit ~/.valbot_config.json as per README."
   say "  - To use EC proxy later for pip: pip install --proxy=\"http://proxy-chain.intel.com:911\" -r requirements.txt"
 }

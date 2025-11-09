@@ -2,10 +2,11 @@
 
 ## Overview
 
-ValBot-CLI is a powerful, extensible command-line interface for AI-assisted development and interaction. ValBot combines conversational AI with autonomous agent workflows to help you code, debug, analyze specifications, and automate complex tasks—all from your terminal.
+ValBot-CLI is a powerful, extensible AI assistant with both a modern Terminal User Interface (TUI) and traditional command-line interface. ValBot combines conversational AI with autonomous agent workflows to help you code, debug, analyze specifications, and automate complex tasks—all from your terminal.
 
 **Key Capabilities:**
 
+- **🎨 Modern TUI Interface**: Beautiful Material Design interface with real-time streaming, syntax highlighting, integrated terminal, file explorer, and markdown rendering
 - **💬 Interactive Chat**: Real-time AI conversation with context-aware responses, multiline input, and rich formatting
 - **🤖 Autonomous Agents**: Pre-built and custom agents that can execute multi-step workflows, use tools, and interact with files, git, terminals, and more
 - **🔌 Extensible Plugin System**: Add custom agents from local files or Git repositories, create your own agents, and share them with others
@@ -13,7 +14,7 @@ ValBot-CLI is a powerful, extensible command-line interface for AI-assisted deve
 - **🔄 Built-in Updates**: Keep ValBot and installed plugins up to date with the `/update` command
 - **📝 Context Management**: Load conversation context from files to give the AI deep understanding of your codebase
 
-Whether you're asking quick questions, analyzing complex specifications, or running sophisticated agent workflows, ValBot adapts to your needs with a simple, terminal-first interface.
+Whether you're asking quick questions, analyzing complex specifications, or running sophisticated agent workflows, ValBot adapts to your needs with both a beautiful visual TUI and powerful CLI interface.
 
 ![image](https://github.com/user-attachments/assets/10b07c71-3fb4-40c9-a8eb-2a26366cefb4)
 
@@ -198,53 +199,70 @@ alias valbot '~/scripts/valbot.sh'
 
 ---
 
-## ValBot TUI (Terminal User Interface)
+## ValBot TUI (Terminal User Interface) - Recommended
 
-ValBot includes a beautiful, feature-rich Terminal User Interface (TUI) built with Textual, providing a modern visual experience alongside the traditional CLI mode.
+ValBot's primary interface is a beautiful, feature-rich Terminal User Interface (TUI) built with Textual. The TUI provides a modern visual experience with real-time streaming, integrated tools, and an intuitive layout—making it the best way to interact with ValBot.
+
+### Why Use the TUI?
+
+- **Visual and Intuitive**: Beautiful Material Design interface with clear message organization
+- **Integrated Tools**: Built-in terminal and file explorer eliminate context switching
+- **Enhanced Productivity**: Keyboard shortcuts, autocomplete, and visual feedback streamline your workflow
+- **Better Visualization**: Syntax-highlighted code blocks with copy buttons, markdown rendering, and organized layout
+- **Same Power**: Full feature parity with CLI mode—all commands, agents, and capabilities available
 
 ### TUI Features
 
 🎨 **Modern Material Design Interface**
-- Beautiful dark theme with gradient accents
+- Beautiful dark theme with gradient accents (customizable)
 - Smooth animations and responsive layout
 - Real-time message streaming with progress indicators
-- Syntax-highlighted code blocks with copy buttons
-- Full markdown rendering support
+- Syntax-highlighted code blocks with one-click copy buttons
+- Full markdown rendering with tables, lists, quotes, and emphasis
+- Collapsible sections for better organization
 
 💬 **Interactive Chat Experience**
 - Real-time AI conversation with streaming responses
-- Message history with user/assistant differentiation
+- Message history with clear user/assistant differentiation
 - Multi-line input support via system editor
-- Reasoning display for GPT-5 models (when enabled)
+- Reasoning display for GPT-5 models (when `display_reasoning` enabled)
 - Visual feedback on loaded files and context
+- Configurable reasoning effort levels (low/medium/high)
+- Response streaming with proper event handling
 
 🖥️ **Integrated Terminal**
-- Execute shell commands directly in the TUI
-- Real-time output streaming
+- Execute shell commands directly in the TUI with `/terminal`
+- Real-time output streaming in dedicated panel
 - Directory navigation and environment management
 - Command history and error handling
+- Toggle visibility with `Ctrl+T` to maximize workspace
 
 📁 **File System Integration**
-- Built-in file explorer with directory tree view
+- Built-in file explorer with interactive directory tree view
 - Load files into conversation context with visual feedback
 - File content preview with syntax highlighting
 - Support for glob patterns and multiple files
+- Toggle file explorer with `Ctrl+F`
 
 ⌨️ **Keyboard Shortcuts**
 - `Ctrl+Q` - Quit application
-- `Ctrl+C` - Clear chat history
+- `Ctrl+C` or `Ctrl+N` - Clear chat history / New conversation
 - `Ctrl+T` - Toggle terminal panel
 - `Ctrl+F` - Toggle file explorer
-- `Ctrl+M` - Change AI model
-- `Esc` - Cancel current operation
+- `Ctrl+M` - Change AI model (interactive picker)
+- `Ctrl+A` - Agent picker (interactive selection)
+- `Ctrl+S` - Save session (when implemented)
+- `Esc` - Cancel current operation/close pickers
 
-✅ **Full CLI Feature Parity**
-- All slash commands: `/clear`, `/help`, `/model`, `/agent`, `/context`, `/file`, `/terminal`, `/multi`, `/prompts`, `/commands`, `/settings`, `/reload`, `/update`, `/add_agent`, `/add_tool`
-- CommandManager integration with custom prompts and commands
-- Agent system with interactive picker and descriptions
-- Context management with ContextManager integration
-- System prompt loading from configuration
-- GPT-5 reasoning support with configurable effort levels
+✅ **Complete Feature Parity with CLI**
+- **All slash commands**: `/clear`, `/new`, `/help`, `/quit`, `/model`, `/agent`, `/context`, `/file`, `/terminal`, `/multi`, `/prompts`, `/commands`, `/settings`, `/reload`, `/update`, `/add_agent`, `/add_tool`
+- **CommandManager integration**: Full support for custom prompts with argument parsing
+- **Custom commands**: From agent plugins with automatic delegation to plugin manager
+- **Agent system**: Interactive agent picker with arrow navigation, descriptions, and full workflow execution
+- **Context management**: Complete ContextManager integration with visual feedback
+- **System prompt**: Automatically loads `system_prompt` from config on startup
+- **GPT-5 reasoning**: Displays thinking process with configurable effort levels
+- **Tool integration**: All common tools (ask_human, file_tools, git_tools, github_tools, terminal_tools, hsd_tools)
 
 ### Installing TUI Dependencies
 
@@ -260,7 +278,7 @@ Or reinstall all requirements (includes TUI libraries):
 pip install -r requirements.txt
 ```
 
-For Linux EC with proxy:
+**For Linux EC with proxy:**
 ```bash
 pip install --proxy="http://proxy-chain.intel.com:911" textual textual-dev
 # Or reinstall all requirements
@@ -271,113 +289,304 @@ pip install --proxy="http://proxy-chain.intel.com:911" -r requirements.txt
 
 #### Windows
 
-Using the provided batch file:
+**Using the provided batch file (easiest):**
 ```cmd
 valbot_tui.bat
 ```
 
-Using Python directly:
+**Using Python directly:**
 ```cmd
 python valbot_tui_launcher.py
 ```
 
-With custom configuration:
+**With custom configuration:**
 ```cmd
 python app.py --tui --config my_config.json
 ```
 
+**From main app:**
+```cmd
+python app.py --tui
+```
+
 #### Linux/macOS
 
-Make the launcher executable and run:
+**Make the launcher executable and run:**
 ```bash
 chmod +x valbot_tui.sh
 ./valbot_tui.sh
 ```
 
-Using Python directly:
+**Using Python directly:**
 ```bash
 python valbot_tui_launcher.py
 ```
 
-With custom configuration:
+**With custom configuration:**
 ```bash
 python app.py --tui --config my_config.json
 ```
 
+**From main app:**
+```bash
+python app.py --tui
+```
+
 ### TUI Slash Commands
 
-All CLI commands are supported in the TUI:
+All CLI commands are fully supported in the TUI with enhanced visual feedback:
 
 **Chat Commands:**
-- `/clear` - Clear conversation history
-- `/new` - Start new conversation
-- `/help` - Show comprehensive help
-- `/quit` or `/exit` - Exit application
+- `/clear` or `/new` - Clear conversation history and start fresh
+- `/help` - Show comprehensive help with all available commands
+- `/quit` or `/exit` - Exit the application gracefully
 
 **Model & Agent Commands:**
-- `/model` - Interactive model picker with arrow keys
+- `/model` - Interactive model picker with arrow key navigation
+  - Shows available models from your configured endpoints
+  - Displays current model and allows switching
+  - Visual confirmation of model change
 - `/agent` - Interactive agent selection with descriptions
+  - Browse all available agents with descriptions
+  - Shows agent names, descriptions, and required arguments
+  - Execute agent workflows with full context
+  - Error handling and status reporting
 
 **File & Context Commands:**
-- `/context <files>` - Load files into conversation (supports globs)
+- `/context <files>` - Load files into conversation context
+  - Supports single files: `/context myfile.py`
+  - Supports glob patterns: `/context src/**/*.py`
+  - Supports multiple files: `/context file1.py file2.js`
+  - Visual feedback showing loaded files
+  - File content preview with syntax highlighting
 - `/file <path>` - Display file contents with syntax highlighting
+  - Shows file in a formatted panel
+  - Automatic language detection
+  - Syntax highlighting for better readability
 
 **Terminal Commands:**
-- `/terminal <command>` - Execute shell commands
+- `/terminal <command>` - Execute shell commands in integrated terminal
+  - Real-time output streaming in terminal panel
+  - Support for any shell command
+  - Error output clearly displayed
+  - Panel toggles automatically when needed
 
 **Advanced Commands:**
 - `/multi` - Multi-line input via system editor
-- `/prompts` - Show custom prompts
+  - Opens your default system editor (vim, nano, notepad, etc.)
+  - Allows composing complex multi-line prompts
+  - Preserves formatting and indentation
+- `/prompts` - Show custom prompts from config
+  - Lists all available custom prompts
+  - Shows descriptions and required arguments
+  - Invoke with `/prompt_name [args]`
 - `/commands` - Show all available commands
-- `/settings` - Display settings information
+  - Lists slash commands, custom commands, and agent commands
+  - Shows descriptions and usage
+  - Includes both built-in and plugin commands
+- `/settings` - Display current settings
+  - Shows model configuration
+  - Displays endpoint information
+  - Shows system prompt status
 - `/reload` - Reinitialize chatbot
-- `/update` - Check for updates
+  - Reloads configuration from files
+  - Refreshes agent and tool plugins
+  - Useful after editing config files
+- `/update` - Check for and install updates
+  - Checks main app and plugin updates
+  - Shows version/commit information
+  - Interactive update selection
 - `/add_agent` - Add new agent from Git repo or local path
+  - Interactive prompts for agent details
+  - Supports local and GitHub sources
+  - Automatic tool dependency installation
+  - Saves to `~/.valbot_config.json`
 - `/add_tool` - Add new tool extension
+  - Similar to `/add_agent` for tools
+  - Local and remote sources supported
+  - Integrates with plugin system
 
 ### TUI Interface Layout
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ ValBot TUI                                    🕐 14:23:45        │
+│ 🤖 ValBot TUI - AI Assistant              🕐 14:23:45           │
 ├─────────────────────────────────────────┬───────────────────────┤
 │                                         │                       │
 │         Chat Panel                      │   File Explorer       │
-│   (Messages and responses)              │   (Optional panel)    │
-│                                         │                       │
+│   ┌───────────────────────────────┐     │   (Toggle: Ctrl+F)    │
+│   │ You: How do I...              │     │                       │
+│   └───────────────────────────────┘     │   📁 src/             │
+│   ┌───────────────────────────────┐     │     📄 app.py         │
+│   │ Assistant:                     │     │     📄 config.py      │
+│   │ Here's how...                 │     │   📁 tests/           │
+│   │                               │     │     📄 test_app.py    │
+│   │ ```python                     │     │                       │
+│   │ def example():      [Copy]    │     │                       │
+│   │     return True               │     │                       │
+│   │ ```                           │     │                       │
+│   └───────────────────────────────┘     │                       │
 ├─────────────────────────────────────────┴───────────────────────┤
 │                                                                 │
-│         Terminal Panel (Collapsible)                            │
-│   (Command output and execution)                                │
+│         Terminal Panel (Toggle: Ctrl+T)                         │
+│   $ python --version                                            │
+│   Python 3.11.0                                                 │
+│   $                                                             │
 │                                                                 │
 ├─────────────────────────────────────────────────────────────────┤
-│ Type your message or /command...                               │
+│ > Type your message or /command... ▊                            │
 ├─────────────────────────────────────────────────────────────────┤
-│ Model: gpt-4o | Session: new | Mode: chat                      │
+│ Model: gpt-4o | Session: active | Ready                        │
+└─────────────────────────────────────────────────────────────────┘
+│ Ctrl+Q Quit | Ctrl+M Model | Ctrl+A Agent | Ctrl+F Files       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### TUI Tips
+### TUI Usage Examples
 
-1. **Best Terminal Experience**
-   - Use modern terminals: Windows Terminal, iTerm2, GNOME Terminal, or Alacritty
-   - Recommended size: 120 columns × 40 rows (minimum 80×24)
-   - Enable 256-color or true color support
-   - Use fonts with ligatures (Fira Code, JetBrains Mono)
+**Basic Chat:**
+```
+1. Launch TUI: valbot_tui.bat (Windows) or ./valbot_tui.sh (Linux)
+2. Type your message: "How do I read files in Python?"
+3. Press Enter
+4. Watch response stream in real-time with syntax highlighting
+```
 
-2. **Performance Optimization**
-   - Clear chat history regularly with `/clear` or `Ctrl+C`
-   - Close terminal panel when not in use with `Ctrl+T`
-   - Use specific models appropriate for your needs
+**Using Agents:**
+```
+1. Press Ctrl+A or type /agent
+2. Navigate with arrow keys to select an agent
+3. Press Enter to select
+4. Provide any required arguments when prompted
+5. Watch agent execute workflow with visual feedback
+```
 
-3. **Development Mode**
-   ```bash
-   # Run with hot reload
-   textual run --dev valbot_tui.py
-   
-   # View debug console
-   textual console
-   ```
+**Loading Context:**
+```
+1. Type: /context src/**/*.py
+2. See visual confirmation of loaded files
+3. Ask questions about the code
+4. Files remain in context for the conversation
+```
+
+**Integrated Terminal:**
+```
+1. Type: /terminal ls -la
+2. Terminal panel opens automatically
+3. See real-time command output
+4. Press Ctrl+T to toggle terminal visibility
+```
+
+**File Explorer:**
+```
+1. Press Ctrl+F to open file explorer
+2. Navigate with arrow keys
+3. Press Enter to load file into context
+4. File content appears in chat with syntax highlighting
+```
+
+### TUI Tips & Best Practices
+
+**1. Terminal Experience**
+- **Recommended terminals**: Windows Terminal, iTerm2, GNOME Terminal, Alacritty, Konsole
+- **Minimum size**: 80 columns × 24 rows
+- **Recommended size**: 120 columns × 40 rows
+- **Optimal size**: Full screen or maximized window
+- **Color support**: Enable 256-color or true color (24-bit) in terminal settings
+- **Font recommendations**: 
+  - Fira Code (with ligatures)
+  - JetBrains Mono
+  - Cascadia Code
+  - Source Code Pro
+
+**2. Performance Optimization**
+- Clear chat history regularly with `/clear` or `Ctrl+C` to free memory
+- Close terminal panel when not in use with `Ctrl+T`
+- Close file explorer with `Ctrl+F` when not needed
+- Use appropriate models for your task:
+  - `gpt-4.1-mini` or `gpt-5-mini` for simple queries
+  - `gpt-4.1` or `gpt-5` for complex reasoning
+- Enable reasoning display only when needed (config: `display_reasoning: true`)
+
+**3. Keyboard Shortcuts Workflow**
+- Use `Ctrl+M` for quick model switching during conversation
+- Use `Ctrl+A` for quick agent access without typing commands
+- Use `Esc` to cancel any picker or operation
+- Use `Ctrl+T` to toggle terminal without losing focus
+- Use `Ctrl+F` to quickly load files from explorer
+
+**4. Code Block Management**
+- Hover over code blocks to see copy button
+- Click copy button to copy code to clipboard
+- Use syntax highlighting to verify code language detection
+- Collapsed sections help manage long responses
+
+**5. Development & Debugging**
+
+**Run with hot reload for development:**
+```bash
+textual run --dev valbot_tui.py
+```
+
+**View debug console in separate terminal:**
+```bash
+# Terminal 1: Start debug console
+textual console
+
+# Terminal 2: Run TUI
+python valbot_tui_launcher.py
+```
+
+**Enable debug logging:**
+```python
+# Add to valbot_tui.py temporarily
+import logging
+logging.basicConfig(level=logging.DEBUG)
+```
+
+### Troubleshooting TUI
+
+**TUI won't start:**
+```bash
+# Check if textual is installed
+pip show textual
+
+# Reinstall if needed
+pip install textual textual-dev
+
+# Try with explicit Python version
+python3.11 valbot_tui_launcher.py
+```
+
+**Display rendering issues:**
+- Update to latest textual: `pip install --upgrade textual`
+- Try a different terminal emulator
+- Check terminal color support: `echo $COLORTERM`
+- Disable terminal transparency/blur effects
+
+**Keyboard shortcuts not working:**
+- Check if terminal is intercepting shortcuts
+- Try alternative shortcuts (some terminals may conflict)
+- Check terminal key binding settings
+- On macOS, ensure Terminal preferences allow shortcuts
+
+**Slow performance:**
+- Clear chat history with `/clear`
+- Close unused panels (terminal, file explorer)
+- Reduce terminal window size slightly
+- Use smaller models for simple queries
+- Check system resources (CPU, memory)
+
+**Copy button not working:**
+- Ensure clipboard support is available on your system
+- On Linux, install `xclip` or `xsel`: `sudo apt install xclip`
+- Check terminal clipboard integration settings
+
+**File explorer not showing files:**
+- Check file permissions in the directory
+- Verify you're in the correct working directory
+- Try collapsing and expanding folder nodes
+- Restart TUI if file system changed
 
 ---
 

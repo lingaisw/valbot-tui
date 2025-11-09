@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 echo ========================================
 echo      ValBot CLI Setup Script
 echo ========================================
@@ -23,22 +24,8 @@ call :check_env_file
 echo ✅  Python %PY_VER% found! Proceeding with setup...
 echo.
 
-:: Create virtual environment
-echo Creating virtual environment...
-if exist "venv" (
-    echo Virtual environment already exists. Removing old one...
-    rmdir /s /q venv
-)
-
-"%PY_EXE%" %PY_ARGS% -m venv venv
-if %errorlevel% neq 0 (
-    echo ERROR: Failed to create virtual environment
-    pause
-    exit /b 1
-)
-
-echo ✅  Virtual environment created successfully!
-echo.
+:: Create or use virtual environment
+call :choose_or_create_venv
 
 :: Prompt for proxy before pip operations
 call :prompt_proxy
@@ -46,17 +33,17 @@ call :prompt_proxy
 :: Upgrade virtual environment's pip
 echo Upgrading pip...
 if "%USE_PROXY%"=="1" (
-    venv\Scripts\python.exe -m pip install --proxy "%PROXY_URL%" --upgrade pip --no-cache-dir
+    "%VENV_PATH%\Scripts\python.exe" -m pip install --proxy "%PROXY_URL%" --upgrade pip --no-cache-dir
 ) else (
-    venv\Scripts\python.exe -m pip install --upgrade pip --no-cache-dir
+    "%VENV_PATH%\Scripts\python.exe" -m pip install --upgrade pip --no-cache-dir
 )
 
 :: Install requirements
 echo Installing requirements...
 if "%USE_PROXY%"=="1" (
-    venv\Scripts\pip.exe install --proxy "%PROXY_URL%" -r requirements.txt --disable-pip-version-check --upgrade --no-cache-dir
+    "%VENV_PATH%\Scripts\pip.exe" install --proxy "%PROXY_URL%" -r requirements.txt --disable-pip-version-check --upgrade --no-cache-dir
 ) else (
-    venv\Scripts\pip.exe install -r requirements.txt --disable-pip-version-check --upgrade --no-cache-dir
+    "%VENV_PATH%\Scripts\pip.exe" install -r requirements.txt --disable-pip-version-check --upgrade --no-cache-dir
 )
 if %errorlevel% neq 0 (
     echo ERROR: Failed to install requirements
@@ -177,7 +164,7 @@ set ADD_DATA=%ADD_DATA% --add-data ".env;."
 set ADD_DATA=%ADD_DATA% --add-data "agent_plugins;agent_plugins"
 set ADD_DATA=%ADD_DATA% --add-data "build_info.json;."
 
-venv\Scripts\python.exe -m PyInstaller --onefile --name valbot %ADD_DATA% --collect-all readchar --copy-metadata pydantic-ai-slim --copy-metadata pydantic-ai --hidden-import pydantic_ai app.py
+"%VENV_PATH%\Scripts\python.exe" -m PyInstaller --onefile --name valbot %ADD_DATA% --collect-all readchar --copy-metadata pydantic-ai-slim --copy-metadata pydantic-ai --hidden-import pydantic_ai app.py
 if %errorlevel% neq 0 (
     echo ERROR: Failed to build executable with PyInstaller.
     pause
@@ -269,8 +256,29 @@ exit /b 1
 :check_env_file
 REM Check for .env file and create with VALBOT_CLI_KEY if missing
 if exist ".env" (
-    echo ✅  .env file already exists. Ensure VALBOT_CLI_KEY is set.
+    echo ✅  .env file already exists.
+    REM Try to extract existing key
+    for /f "usebackq tokens=2 delims==" %%k in (".env") do (
+        set "EXISTING_KEY=%%k"
+        goto :check_existing_key
+    )
+    :check_existing_key
+    if defined EXISTING_KEY (
+        if not "%EXISTING_KEY%"=="your_valbot_cli_key_here" (
+            echo Found existing VALBOT_CLI_KEY in .env file.
+            set /p "USE_EXISTING=Use the existing key from .env file? [Y/n]: "
+            if /I "!USE_EXISTING!"=="n" (
+                echo You can enter a new key below.
+                goto :prompt_new_key
+            ) else (
+                echo ✅  Using existing key from .env file.
+                goto :eof
+            )
+        )
+    )
+    echo Ensure VALBOT_CLI_KEY is set.
 ) else (
+    :prompt_new_key
     echo Creating .env file...
     echo You need a VALBOT_CLI_KEY to use ValBot CLI. You can obtain this key by following the instructions at:
     echo https://github.com/intel-innersource/applications.ai.valbot-cli?tab=readme-ov-file#setup
@@ -285,5 +293,97 @@ if exist ".env" (
         > .env echo VALBOT_CLI_KEY=your_valbot_cli_key_here
         echo ✅  .env file created with placeholder VALBOT_CLI_KEY. You can update it later.
     )
+)
+goto :eof
+
+:choose_or_create_venv
+REM Create a new virtual environment or use an existing one
+echo.
+echo Create a new virtual environment or use an existing one. ^(Default: create new^)
+set /p "CREATE_NEW=Create a new virtual environment now? [Y/n]: "
+if /I "%CREATE_NEW%"=="n" (
+    goto :use_existing_venv
+)
+
+:prompt_venv_path
+set "DEFAULT_VENV=%CD%\venv"
+set /p "VENV_INPUT=Enter a path where we should create the venv [%DEFAULT_VENV%]: "
+if not defined VENV_INPUT set "VENV_INPUT=%DEFAULT_VENV%"
+set "VENV_PATH=%VENV_INPUT%"
+
+REM Check if path exists and is not a directory
+if exist "%VENV_PATH%" (
+    if not exist "%VENV_PATH%\*" (
+        echo ERROR: Path exists and is not a directory: %VENV_PATH%
+        goto :prompt_venv_path
+    )
+)
+
+REM Check if directory exists and is not empty
+if exist "%VENV_PATH%\*" (
+    dir /b "%VENV_PATH%" | findstr "^" >nul
+    if not errorlevel 1 (
+        echo Directory '%VENV_PATH%' exists and is not empty.
+        :ask_action
+        set /p "ACTION=How would you like to proceed? [U]se as is, [D]elete and create new, or [C]hoose a different path [u/d/c]: "
+        if /I "%ACTION%"=="u" (
+            REM Check if activate script exists
+            if exist "%VENV_PATH%\Scripts\activate.bat" (
+                echo ✅  Using existing venv: %VENV_PATH%
+                goto :eof
+            ) else (
+                echo WARNING: No activate script found at '%VENV_PATH%\Scripts\activate.bat'. This may not be a Python virtual environment.
+                set /p "CONTINUE_ANYWAY=Continue anyway and use this directory as is? [y/N]: "
+                if /I "!CONTINUE_ANYWAY!"=="y" (
+                    echo ✅  Using existing directory as venv: %VENV_PATH%
+                    goto :eof
+                ) else (
+                    goto :ask_action
+                )
+            )
+        ) else if /I "%ACTION%"=="d" (
+            set /p "CONFIRM_DELETE=Really delete '%VENV_PATH%' and create a new venv here? This will remove ALL contents. [y/N]: "
+            if /I "!CONFIRM_DELETE!"=="y" (
+                echo Deleting existing directory...
+                rmdir /s /q "%VENV_PATH%"
+                goto :create_new_venv
+            ) else (
+                goto :ask_action
+            )
+        ) else if /I "%ACTION%"=="c" (
+            goto :prompt_venv_path
+        ) else (
+            echo Please enter 'u' ^(use^), 'd' ^(delete and create new^), or 'c' ^(choose a different path^).
+            goto :ask_action
+        )
+    )
+)
+
+:create_new_venv
+echo Creating virtual environment at: %VENV_PATH%
+"%PY_EXE%" %PY_ARGS% -m venv "%VENV_PATH%"
+if %errorlevel% neq 0 (
+    echo ERROR: Failed to create virtual environment
+    pause
+    exit /b 1
+)
+echo ✅  Virtual environment created successfully!
+echo.
+goto :eof
+
+:use_existing_venv
+set "DEFAULT_VENV=%CD%\venv"
+:prompt_existing_venv
+set /p "VENV_INPUT=Enter existing venv path [%DEFAULT_VENV%]: "
+if not defined VENV_INPUT set "VENV_INPUT=%DEFAULT_VENV%"
+set "VENV_PATH=%VENV_INPUT%"
+
+if exist "%VENV_PATH%\Scripts\activate.bat" (
+    echo ✅  Using existing venv: %VENV_PATH%
+    echo.
+    goto :eof
+) else (
+    echo ERROR: No activate script found at '%VENV_PATH%\Scripts\activate.bat'. Please provide a valid venv path.
+    goto :prompt_existing_venv
 )
 goto :eof

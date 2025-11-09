@@ -15,12 +15,25 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Check if virtual environment exists
-if [ -f "venv/bin/activate" ]; then
-    echo "Activating virtual environment..."
-    source venv/bin/activate
+# Check for virtual environment in multiple locations
+VENV_FOUND=0
+VENV_PATH=""
+
+# Check common venv locations
+for VENV_DIR in "venv" "valbot-venv" ".venv"; do
+    if [ -f "$SCRIPT_DIR/$VENV_DIR/bin/activate" ]; then
+        VENV_PATH="$SCRIPT_DIR/$VENV_DIR"
+        VENV_FOUND=1
+        break
+    fi
+done
+
+# Activate virtual environment if found
+if [ $VENV_FOUND -eq 1 ]; then
+    echo "Activating virtual environment at $VENV_PATH..."
+    source "$VENV_PATH/bin/activate"
 else
-    echo "Warning: Virtual environment not found at venv/"
+    echo "Warning: Virtual environment not found in common locations (venv, valbot-venv, .venv)"
     echo "Running with system Python..."
 fi
 

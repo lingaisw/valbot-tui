@@ -75,6 +75,8 @@ valbot_tui.bat
 ./valbot_tui.sh
 ```
 
+**Note:** The launcher scripts automatically detect virtual environments in common locations (`venv`, `valbot-venv`, `.venv`). If a virtual environment is found, it will be activated automatically. If not found, the scripts will run with your system Python installation.
+
 That's it! The TUI will launch with a beautiful interface ready for your AI conversations.
 
 #### Setting Up the `valbot` Alias Manually
@@ -89,7 +91,7 @@ Add to your PowerShell profile (`$PROFILE`):
 notepad $PROFILE
 
 # Add this line (replace with your actual path):
-function valbot { & "C:\path\to\valbot-cli-main\valbot_tui.bat" $args }
+function valbot { & "valbot_tui.bat" $args }
 ```
 
 After saving, reload your profile:
@@ -110,7 +112,7 @@ Create a batch file named `valbot.bat` in a directory that's in your PATH (e.g.,
 Add to your `~/.bashrc` or `~/.bash_profile`:
 ```bash
 # Add this line (replace with your actual path):
-alias valbot="/path/to/valbot-cli-main/valbot_tui.sh"
+alias valbot "valbot_tui.sh"
 ```
 
 Then reload your shell configuration:
@@ -157,9 +159,12 @@ For a fully automated setup with virtual environment creation and configuration,
 ```
 
 This will:
-- Create a virtual environment
-- Install all dependencies
-- Prompt for your API key
+- Interactively create or use an existing virtual environment with flexible path selection
+- Option to use existing venv, delete and recreate, or choose a different path
+- Validate existing virtual environments before use
+- Install all dependencies with optional proxy support
+- Detect and optionally reuse existing API key from .env file
+- Prompt for your API key if not already configured
 - Build a standalone executable (optional)
 
 #### Intel EC Linux: ec_linux_setup.sh
@@ -170,9 +175,12 @@ chmod +x ec_linux_setup.sh
 ```
 
 This will:
-- Let you select Python interpreter
-- Create virtual environment
+- Let you select Python interpreter (auto-detects EC default paths)
+- Interactively create or use an existing virtual environment with flexible path selection
+- Option to use existing venv, delete and recreate, or choose a different path
+- Validate existing virtual environments before use
 - Install dependencies with proxy support
+- Detect and optionally reuse existing API key from .env file
 - Generate launcher scripts (valbot.sh and valbot.csh that launch the TUI by default)
 - Set up aliases for convenient access to ValBot TUI
 

@@ -132,36 +132,30 @@ IS_LINUX = sys.platform.startswith('linux')
 if IS_LINUX:
     # ASCII symbols for Linux
     EMOJI = {
-        'checkmark': '[✓]',
-        'rocket': '',
-        'clipboard': '\\[i]',
-        'info': '\\[i]',
-        'lightbulb': '[?]',
-        'robot': '[>_]',
-        'user': '▶',
-        'cross': '\\[X]',
-        'folder': '▚',
-        'lightning': '[#]',
-        'gear': '◆',
-        'success': '[OK]',
-        'file': '▙',
-        'keyboard': '[KB]',
+        'checkmark': '✓',
+        'clipboard': '[>_]',
+        'info': 'ℹ️',
+        'lightbulb': '◐',
+        'robot': '⚞⚟',
+        'user': '❰❱',
+        'cross': '✕',
+        'gear': '⚙️',
+        'folder': '◨',
+        'file': '◫',
+        'keyboard': '⌨️',
     }
 else:
     # Unicode emojis for Windows/Mac
     EMOJI = {
         'checkmark': '✅',
-        'rocket': '🚀',
         'clipboard': '📋',
         'info': 'ℹ️',
         'lightbulb': '💡',
         'robot': '🤖',
         'user': '👤',
         'cross': '❌',
-        'folder': '📁',
-        'lightning': '⚡',
         'gear': '⚙️',
-        'success': '✅',
+        'folder': '📁',
         'file': '📄',
         'keyboard': '⌨️',
     }
@@ -179,7 +173,7 @@ VALBOT_DARK_THEME = Theme(
     success="#10b981",           # Emerald - success states
     background="#0f172a",        # Slate-950 - main background
     surface="#1e293b",           # Slate-800 - surface/panel background
-    panel="#334155",             # Slate-700 - elevated panels
+    panel="#353e4f",             # Slate-700 - elevated panels
     dark=True,
     # Additional variables for text colors
     variables={
@@ -401,7 +395,7 @@ class CodeBlockHeader(Container):
             import pyperclip
             pyperclip.copy(self.code)
             btn = self.query_one("#copy-btn", Button)
-            btn.label = EMOJI['success']
+            btn.label = EMOJI['checkmark']
             await asyncio.sleep(2)
             btn.label = "Copy"
         except ImportError:
@@ -451,7 +445,7 @@ class CopyButton(Static):
             import pyperclip
             pyperclip.copy(self.code_content)
             # Show success state
-            self.label = EMOJI['success']
+            self.label = EMOJI['checkmark']
             self.add_class("success")
             self.refresh()
             # Reset after 1.5 seconds
@@ -513,39 +507,135 @@ class ChatMessage(Container):
     .message-content {
         background: transparent;
     }
+    
+    /* RichLog styling to match Markdown */
+    ChatMessage RichLog.message-content {
+        background: transparent;
+        border: none;
+        padding: 0;
+        scrollbar-size: 0 0;
+        height: auto;
+    }
     """
     
     can_focus = False  # Prevent focus/selection
     
     @staticmethod
+    def _has_rich_color_markup(content: str) -> bool:
+        """
+        Check if content has Rich color markup tags.
+        Returns True if content has color tags that would benefit from RichLog rendering.
+        """
+        # Pattern to detect Rich color tags (including combined style+color like [bold green])
+        # Matches: [green], [bold green], [italic yellow], etc.
+        color_pattern = r'\[(?:(?:bold|italic|dim|underline|strike|blink|reverse)\s+)?(?:red|green|blue|yellow|cyan|magenta|white|black|orange|purple|pink|deep_pink|grey\d+|#[0-9a-fA-F]{6}|rgb\([^\)]+\))'
+        return re.search(color_pattern, content, re.IGNORECASE) is not None
+    
+    @staticmethod
+    def _has_markdown_syntax(content: str) -> bool:
+        """
+        Check if content has markdown syntax (code blocks, headers, lists, etc.).
+        Returns True if content needs markdown rendering.
+        """
+        # Check for common markdown patterns
+        markdown_patterns = [
+            r'```',           # Code blocks
+            r'^#{1,6}\s',     # Headers
+            r'^\s*[-*+]\s',   # Unordered lists
+            r'^\s*\d+\.\s',   # Ordered lists
+            r'\[.+?\]\(.+?\)', # Links
+            r'^\|.+\|$',      # Tables
+        ]
+        for pattern in markdown_patterns:
+            if re.search(pattern, content, re.MULTILINE):
+                return True
+        return False
+    
+    @staticmethod
     def _convert_rich_markup_to_markdown(content: str) -> str:
         """
-        Convert Rich markup tags to markdown equivalents where possible.
-        This allows both Rich-style tags and markdown to work together.
+        Convert Rich markup tags to markdown equivalents.
+        Strips all Rich formatting and converts styles to markdown.
         
-        Conversions:
-        - [bold]text[/bold] or [bold]text[/] → **text**
-        - [italic]text[/italic] or [italic]text[/] → *text*
-        - [dim]text[/dim] or [dim]text[/] → _text_ (closest markdown equivalent)
-        - Color tags are removed (can't be represented in markdown)
+        Strategy:
+        1. Convert style tags (bold, italic) to markdown
+        2. Remove all color/style tags completely
+        3. Clean up any remaining Rich markup
         """
-        # Convert [bold]...[/bold] or [bold]...[/] to **text**
-        content = re.sub(r'\[bold\](.*?)\[/(?:bold)?\]', r'**\1**', content, flags=re.IGNORECASE)
+        # First pass: Handle [bold ...] tags with any modifiers (colors, etc.)
+        # Use a more aggressive pattern that captures the style word and ignores everything after
+        # Match: [bold ...] content [/bold ...] OR [bold ...] content [/]
         
-        # Convert [italic]...[/italic] or [italic]...[/] to *text*
-        content = re.sub(r'\[italic\](.*?)\[/(?:italic)?\]', r'*\1*', content, flags=re.IGNORECASE)
+        # Bold: [bold X] -> **, [/bold X] or [/] -> **
+        def replace_bold(match):
+            return f"**{match.group(1)}**"
+        content = re.sub(r'\[bold[^\]]*\](.*?)\[/bold[^\]]*\]', replace_bold, content, flags=re.IGNORECASE | re.DOTALL)
+        content = re.sub(r'\[bold[^\]]*\](.*?)\[/\]', replace_bold, content, flags=re.IGNORECASE | re.DOTALL)
         
-        # Convert [dim]...[/dim] or [dim]...[/] to _text_ (markdown emphasis as closest equivalent)
-        content = re.sub(r'\[dim\](.*?)\[/(?:dim)?\]', r'_\1_', content, flags=re.IGNORECASE)
+        # Italic: [italic X] -> *, [/italic X] or [/] -> *
+        def replace_italic(match):
+            return f"*{match.group(1)}*"
+        content = re.sub(r'\[italic[^\]]*\](.*?)\[/italic[^\]]*\]', replace_italic, content, flags=re.IGNORECASE | re.DOTALL)
+        content = re.sub(r'\[italic[^\]]*\](.*?)\[/\]', replace_italic, content, flags=re.IGNORECASE | re.DOTALL)
         
-        # Remove color tags since markdown doesn't support colors
-        # Match patterns like [red], [green], [#ff0000], [rgb(255,0,0)], etc.
-        content = re.sub(r'\[(?:red|green|blue|yellow|cyan|magenta|white|black|orange|purple|pink|deep_pink|grey\d+|color\d+|#[0-9a-fA-F]{6}|rgb\(\d+,\d+,\d+\))(?:\s+on\s+\w+)?\]', '', content, flags=re.IGNORECASE)
+        # Dim: [dim X] -> _, [/dim X] or [/] -> _
+        def replace_dim(match):
+            return f"_{match.group(1)}_"
+        content = re.sub(r'\[dim[^\]]*\](.*?)\[/dim[^\]]*\]', replace_dim, content, flags=re.IGNORECASE | re.DOTALL)
+        content = re.sub(r'\[dim[^\]]*\](.*?)\[/\]', replace_dim, content, flags=re.IGNORECASE | re.DOTALL)
         
-        # Remove closing tags [/] or [/color]
-        content = re.sub(r'\[/[^\]]*\]', '', content)
+        # Second pass: Remove ALL remaining Rich markup tags
+        # This includes colors, standalone styles, and any other Rich tags
+        # Match any [tag] or [tag something] pattern
+        content = re.sub(r'\[[^\]]+\]', '', content)
         
         return content
+    
+    @staticmethod
+    def _process_backticks_only(content: str) -> str:
+        """
+        Process only backticks in user messages for inline code formatting.
+        Escapes other markdown characters to prevent them from being interpreted,
+        but preserves backticks so they render as inline code.
+        """
+        # Store backtick content temporarily with indices
+        backtick_pattern = r'`([^`]+)`'
+        backtick_matches = []
+        
+        # Find all backtick sections
+        for match in re.finditer(backtick_pattern, content):
+            backtick_matches.append({
+                'start': match.start(),
+                'end': match.end(),
+                'full': match.group(0),
+                'inner': match.group(1)
+            })
+        
+        # Build the result by processing character by character
+        result = []
+        i = 0
+        
+        while i < len(content):
+            # Check if we're at the start of a backtick section
+            in_backtick = False
+            for bt_match in backtick_matches:
+                if i == bt_match['start']:
+                    # Add the entire backtick section as-is
+                    result.append(bt_match['full'])
+                    i = bt_match['end']
+                    in_backtick = True
+                    break
+            
+            if not in_backtick:
+                # Escape markdown special characters
+                char = content[i]
+                if char in '*_#[]()~>-+=|\\':
+                    result.append('\\' + char)
+                else:
+                    result.append(char)
+                i += 1
+        
+        return ''.join(result)
     
     def __init__(self, role: str, content: str, timestamp: Optional[datetime] = None, show_header: bool = True, agent_name: Optional[str] = None):
         super().__init__()
@@ -555,13 +645,35 @@ class ChatMessage(Container):
         self.agent_name = agent_name  # Store the agent name if provided
         self._header_widget = None  # Store header widget reference
         self._content_widget = None  # Store content widget reference
+        self._widget_type = None  # Track which widget type we're using ('markdown' or 'richlog')
         
-        # Convert Rich markup to markdown equivalents for assistant/agent/system messages
-        # Don't convert for user messages to avoid breaking expressions like 2*2*2
+        # Store original content before processing
+        self.original_content = content
+        
+        # Determine which widget to use based on content
+        # Priority: RichLog for pure Rich markup, Markdown for markdown syntax or mixed content
         if role != "user":
-            content = self._convert_rich_markup_to_markdown(content)
+            has_rich_colors = self._has_rich_color_markup(content)
+            has_markdown = self._has_markdown_syntax(content)
+            
+            # Decision logic:
+            # - If has markdown syntax (code blocks, headers, etc.) -> Use Markdown (convert Rich to markdown)
+            # - If has ONLY Rich colors with no markdown -> Use RichLog (preserve colors)
+            # - Otherwise -> Use Markdown (safe default)
+            if has_markdown or not has_rich_colors:
+                # Use Markdown widget - convert Rich markup to markdown
+                self._widget_type = 'markdown'
+                content = self._convert_rich_markup_to_markdown(content)
+            else:
+                # Use RichLog widget - preserve Rich markup for color rendering
+                self._widget_type = 'richlog'
+                # Keep content as-is with Rich markup
+        else:
+            # User messages always use Markdown with backticks only
+            self._widget_type = 'markdown'
+            content = self._process_backticks_only(content)
         
-        # Store the content
+        # Store the processed content
         self.content = content
         
         # Apply role-specific styling
@@ -576,21 +688,42 @@ class ChatMessage(Container):
     
     def update_content(self, new_content: str):
         """Update the message content and refresh the display properly."""
-        # Convert Rich markup to markdown for non-user messages
+        # Store original content
+        self.original_content = new_content
+        
+        # Re-determine widget type based on new content
         if self.role != "user":
-            new_content = self._convert_rich_markup_to_markdown(new_content)
+            has_rich_colors = self._has_rich_color_markup(new_content)
+            has_markdown = self._has_markdown_syntax(new_content)
+            
+            if has_markdown or not has_rich_colors:
+                new_widget_type = 'markdown'
+                new_content = self._convert_rich_markup_to_markdown(new_content)
+            else:
+                new_widget_type = 'richlog'
+                # Keep Rich markup for RichLog
+        else:
+            new_widget_type = 'markdown'
+            new_content = self._process_backticks_only(new_content)
+        
         self.content = new_content
         
-        # Update the appropriate widget based on role
+        # If widget type changed, need to recompose
+        if new_widget_type != self._widget_type:
+            self._widget_type = new_widget_type
+            self._content_widget = None
+            self.refresh(recompose=True)
+            return
+        
+        # Update the appropriate widget type
         try:
-            if self.role == "user":
-                # User messages use plain Static widget
-                content_widget = self.query_one(".message-content", Static)
-                content_widget.update(new_content)
-            else:
-                # Other messages use Markdown widget
+            if self._widget_type == 'markdown':
                 content_widget = self.query_one(".message-content", Markdown)
                 content_widget.update(new_content)
+            elif self._widget_type == 'richlog':
+                content_widget = self.query_one(".message-content", RichLog)
+                content_widget.clear()
+                content_widget.write(new_content, markup=True)
         except Exception:
             # If widget doesn't exist yet, do a full refresh
             self.refresh(recompose=True)
@@ -632,15 +765,17 @@ class ChatMessage(Container):
                 self._header_widget = Static(header, classes="message-header", markup=True)
             yield self._header_widget
         
-        # Create content widget based on role:
-        # - User messages: Use plain Static (no markdown rendering) to preserve exact input like 2*2*2
-        # - Other messages: Use Markdown for rich formatting (with Rich markup converted to markdown)
+        # Create content widget based on widget type determined in __init__
+        # - 'markdown': Use Markdown widget for markdown syntax (code blocks, headers, etc.)
+        # - 'richlog': Use RichLog widget to preserve Rich color markup
         if self._content_widget is None:
-            if self.role == "user":
-                # Plain text for user messages - no markdown or markup processing
-                self._content_widget = Static(self.content, classes="message-content")
+            if self._widget_type == 'richlog':
+                # Use RichLog to preserve Rich markup with colors
+                richlog = RichLog(highlight=True, markup=True, classes="message-content")
+                richlog.write(self.content)
+                self._content_widget = richlog
             else:
-                # Markdown for assistant/system/error messages
+                # Use Markdown for markdown syntax or converted content
                 self._content_widget = Markdown(self.content, classes="message-content")
         yield self._content_widget
     
@@ -810,7 +945,7 @@ class ChatTerminalOutput(Static):
     def __init__(self, command: str, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.command = command
-        self.border_title = f"{EMOJI['lightning']} Terminal"
+        self.border_title = f"{EMOJI['keyboard']} Terminal"
         self.terminal_manager = TerminalManager()
         
     def compose(self) -> ComposeResult:
@@ -1114,6 +1249,19 @@ class CommandInput(TextArea):
                 autocomplete_visible = True
         
         if event.key == "enter":
+            # Check if AI is processing - block Enter/submission
+            if hasattr(self.screen, 'processing') and self.screen.processing:
+                # Show toast notification
+                if hasattr(self.screen, 'app'):
+                    self.screen.app.notify(
+                        "⚠️ AI is busy.\nPress `Esc` to cancel current response.",
+                        severity="warning",
+                        timeout=2
+                    )
+                event.prevent_default()
+                event.stop()
+                return
+            
             if autocomplete_visible and autocomplete:
                 # Trigger selection from autocomplete
                 option_list = autocomplete.get_option_list()
@@ -1597,10 +1745,7 @@ class MainScreen(Screen):
         border: none !important;
     }
     
-    /* Header and Footer */
-    Header {
-        background: $primary-darken-3;
-    }
+    /*Footer */
     
     Footer {
         background: $surface;
@@ -1670,7 +1815,7 @@ class MainScreen(Screen):
     def show_welcome_message(self):
         """Display the welcome message."""
         chat_panel = self.query_one("#chat-panel", ChatPanel)
-        welcome = f"""# {EMOJI['rocket']} Welcome to ValBot TUI
+        welcome = f"""# ░▒▓ Welcome to ValBot TUI ▓▒░
 
 ### {EMOJI['clipboard']} Available Commands
 
@@ -1687,7 +1832,8 @@ Type `/help` for complete list of commands, or try these:
 ### {EMOJI['info']} Tips
 - Reference local files directly in chat
 - Press `TAB` to autocomplete file paths
-- Change themes from pallete
+- Use key-bindings for quick access. E.g.: `ctrl + a` for Agent
+- Change themes from palette
 
 
 ### {EMOJI['lightbulb']} Getting Started
@@ -2094,12 +2240,10 @@ Please check your configuration and try again.
                 new_cursor_col = context['start_col'] + len(selection)
                 command_input.move_cursor((row, new_cursor_col))
             
-            # If it's a file (not directory), close the autocomplete and clear context
-            if not is_directory:
-                self.hide_autocomplete()
-                self._file_autocomplete_context = None
-            # If it's a directory, keep context active for continued navigation
-            # Don't hide autocomplete yet - will update on next text change
+            # Always close the autocomplete and clear context after selection
+            # User must press Tab again to trigger autocomplete
+            self.hide_autocomplete()
+            self._file_autocomplete_context = None
             
         else:
             # Command completion - replace entire input with command + space
@@ -2199,6 +2343,16 @@ Please check your configuration and try again.
         """Handle selection from inline picker."""
         selected_value = event.value
         
+        # Check if AI is processing - block selection
+        if self.processing and selected_value is not None:
+            self.app.notify(
+                "⚠️ AI is busy.\nPress `Esc` to cancel current response.",
+                severity="warning",
+                timeout=2
+            )
+            # Don't hide the picker - let user try again or cancel
+            return
+        
         # Hide the picker first
         self.hide_inline_picker()
         
@@ -2224,7 +2378,7 @@ Please check your configuration and try again.
             self._cancel_streaming = True
             # Check if we're actually streaming
             if self.processing:
-                self.app.notify("🔴 Response cancelled.", severity="warning", timeout=2)
+                self.app.notify(f"{EMOJI['cross']} Response cancelled.", severity="warning", timeout=2)
         
         # Cancel any ongoing agent execution
         if hasattr(self, '_agent_input_state') and self._agent_input_state:
@@ -2247,7 +2401,7 @@ Please check your configuration and try again.
             self._command_input_state['waiting_for_input'] = False
             self._command_input_state['ready'].set()
             chat_panel = self.query_one("#chat-panel", ChatPanel)
-            chat_panel.add_message("system", "🔴 Command cancelled.")
+            chat_panel.add_message("system", f"{EMOJI['cross']} Command cancelled.")
             return
         
         # Check if inline picker is visible
@@ -2269,7 +2423,7 @@ Please check your configuration and try again.
         if hasattr(self, '_command_input_state') and self._command_input_state.get('waiting_for_input', False):
             # Display user's response
             chat_panel = self.query_one("#chat-panel", ChatPanel)
-            display_msg = message if message else "[italic]\\[empty response][/italic]"
+            display_msg = message if message else ""
             chat_panel.add_message("user", display_msg)
             
             # Provide the response to the command
@@ -2282,7 +2436,7 @@ Please check your configuration and try again.
         if hasattr(self, '_agent_input_state') and self._agent_input_state.get('waiting_for_input', False):
             # Display user's response (show empty message as well)
             chat_panel = self.query_one("#chat-panel", ChatPanel)
-            display_msg = message if message else "[italic]\\[empty response][/italic]"
+            display_msg = message if message else ""
             chat_panel.add_message("user", display_msg)
             
             # Provide the response to the agent (can be empty string)
@@ -2665,7 +2819,7 @@ Edit `user_config.json` to customize your experience:
 Need more help? Just ask ValBot directly!
 
 ---
-**ValBot TUI** - Your AI-Powered Assistant {EMOJI['rocket']}
+**ValBot TUI** - Your AI-Powered Assistant
 """
             chat_panel.add_message("system", help_text)
                 
@@ -2673,7 +2827,7 @@ Need more help? Just ask ValBot directly!
             if args:
                 await chat_panel.add_terminal_output(args)
             else:
-                chat_panel.add_message("system", """## {EMOJI['lightning']} Terminal Command
+                chat_panel.add_message("system", """## {EMOJI['keyboard']} Terminal Command
 
 **Usage**: `/terminal <command>`
 
@@ -2694,7 +2848,7 @@ Need more help? Just ask ValBot directly!
                         
                         if file_size > max_size_bytes:
                             chat_panel.add_message("error", 
-                                f"❌ File too large to display: {file_size / (1024*1024):.2f} MB (limit: 10 MB)\n"
+                                f"{EMOJI['cross']} File too large to display: {file_size / (1024*1024):.2f} MB (limit: 10 MB)\n"
                                 f"Use `/context` to load it into conversation context instead.")
                         else:
                             # Read in chunks for better memory handling
@@ -3729,7 +3883,7 @@ Or use the CLI version with: `python app.py` and run `/update`
                 self.app.call_from_thread(
                     chat_panel.add_message, 
                     "system", 
-                    f"🔴 Agent **{agent_name}** was cancelled."
+                    f"{EMOJI['cross']} Agent **{agent_name}** was cancelled."
                 )
             else:
                 # Add success message
@@ -3743,13 +3897,13 @@ Or use the CLI version with: `python app.py` and run `/update`
             self.app.call_from_thread(
                 chat_panel.add_message, 
                 "system", 
-                f"🔴 Agent: **{agent_name}** was cancelled by user."
+                f"{EMOJI['cross']} Agent: **{agent_name}** was cancelled by user."
             )
         except Exception as e:
             import traceback
             
             # Add error message with traceback for debugging
-            error_details = f"❌ Agent error: {str(e)}\n\n```\n{traceback.format_exc()}\n```"
+            error_details = f"{EMOJI['cross']} Agent error: {str(e)}\n\n```\n{traceback.format_exc()}\n```"
             self.app.call_from_thread(
                 chat_panel.add_message, 
                 "error", 
@@ -3804,7 +3958,7 @@ Or use the CLI version with: `python app.py` and run `/update`
         self._cancel_streaming = False
         
         if not self.chatbot:
-            self.app.call_from_thread(self._add_error_message, """## ❌ ChatBot Not Initialized
+            self.app.call_from_thread(self._add_error_message, f"""## {EMOJI['cross']} ChatBot Not Initialized
 
 ChatBot is not ready. Please check your configuration.
 
@@ -3834,7 +3988,7 @@ ChatBot is not ready. Please check your configuration.
             # Remove loading indicator on error
             self.app.call_from_thread(self._remove_loading_message)
             
-            error_message = f"""## ❌ Error
+            error_message = f"""## {EMOJI['cross']} Error
 
 An error occurred while processing your message:
 
@@ -4118,14 +4272,14 @@ Falling back to standard chat...
                         "content": response_text
                     })
                 # Always show cancellation message (even if no response yet)
-                self.app.call_from_thread(self._add_system_message, "🔴 *Response cancelled by user.*")
+                self.app.call_from_thread(self._add_system_message, f"{EMOJI['cross']} *Response cancelled by user.*")
                 return
                         
         except Exception as e:
             # Remove loading indicator on error
             self.app.call_from_thread(self._remove_loading_message)
             
-            response_text = f"""## ❌ API Communication Error
+            response_text = f"""## {EMOJI['cross']} API Communication Error
 
 ```
 {str(e)}
@@ -4233,16 +4387,22 @@ Falling back to standard chat...
         
         # Cancel any active agent
         agent_was_active = False
-        if hasattr(self, '_agent_input_state') and self._agent_input_state.get('waiting_for_input', False):
-            agent_was_active = True
-            # Signal the agent to stop by providing a cancellation result
-            self._agent_input_state['result'] = None
-            self._agent_input_state['waiting_for_input'] = False
-            self._agent_input_state['ready'].set()  # Unblock the waiting thread
-            delattr(self, '_agent_input_state')
-            
-            # Give the agent thread a moment to process the cancellation
-            await asyncio.sleep(0.1)
+        if hasattr(self, '_agent_input_state') and self._agent_input_state:
+            # Check if agent is running (either waiting for input or actively executing)
+            if self._agent_input_state.get('waiting_for_input', False) or hasattr(chat_panel, 'current_agent') and chat_panel.current_agent:
+                agent_was_active = True
+                # Signal the agent to stop by setting the cancelled flag
+                self._agent_input_state['cancelled'] = True
+                self._agent_input_state['result'] = None
+                self._agent_input_state['waiting_for_input'] = False
+                self._agent_input_state['ready'].set()  # Unblock the waiting thread if it's waiting
+                
+                # Give the agent thread a moment to process the cancellation
+                await asyncio.sleep(0.2)
+                
+                # Clean up the agent input state
+                if hasattr(self, '_agent_input_state'):
+                    delattr(self, '_agent_input_state')
         
         # Clear current agent in chat panel
         if hasattr(chat_panel, 'current_agent') and chat_panel.current_agent:
@@ -4279,7 +4439,7 @@ Falling back to standard chat...
         
         # Notify user if an agent was cancelled via toast
         if agent_was_active:
-            self.app.notify("🔴 Active agent cancelled.", severity="warning", timeout=3)
+            self.app.notify(f"{EMOJI['cross']} Active agent cancelled.", severity="warning", timeout=3)
     
     async def action_agent_picker(self):
         """Open the inline agent picker."""
@@ -4342,7 +4502,7 @@ Falling back to standard chat...
                     self.chatbot.modelname = selected_model
                     chat_panel.add_message("system", f"✅ Now using model: **{selected_model}**")
                 else:
-                    chat_panel.add_message("error", "❌ ChatBot not initialized.")
+                    chat_panel.add_message("error", f"{EMOJI['cross']} ChatBot not initialized.")
         
         # Show inline picker for model selection
         status_bar = self.query_one("#status-bar", StatusBar)
@@ -4438,7 +4598,7 @@ Falling back to standard chat...
 class ValbotTUI(App):
     """ValBot Terminal User Interface with Material Design."""
     
-    TITLE = "🤖 ValBot TUI - AI Assistant"
+    TITLE = f"{EMOJI['robot']} ValBot TUI - AI Assistant"
     
     # Material Design inspired CSS
     CSS = """
@@ -4454,7 +4614,6 @@ class ValbotTUI(App):
     Header {
         dock: top;
         height: 1;
-        background: $primary;
         text-style: bold;
         text-align: center;
         align: center middle;

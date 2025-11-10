@@ -1166,6 +1166,45 @@ class FileExplorerPanel(Container):
         display: block;
     }
     
+    #nav-buttons {
+        width: 100%;
+        height: 1;
+        layout: horizontal;
+        margin-bottom: 1;
+    }
+    
+    #nav-buttons Button {
+        width: 1fr;
+        height: 1;
+        min-width: 0;
+        padding: 0;
+        margin: 0 1 0 0;
+        border: none;
+        background: $panel;
+        content-align: center middle;
+    }
+    
+    #nav-buttons Button:hover {
+        background: $surface-lighten-1;
+    }
+    
+    #nav-buttons Button:disabled {
+        opacity: 0.4;
+    }
+    
+    #nav-buttons Button:last-child {
+        margin: 0;
+    }
+    
+    #address-bar {
+        width: 100%;
+        height: 2;
+        margin-bottom: 1;
+        padding: 0 1;
+        background: $panel;
+        border: none;
+    }
+    
     #file-tree {
         height: 1fr;
         scrollbar-size: 1 1;
@@ -1175,10 +1214,200 @@ class FileExplorerPanel(Container):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.border_title = f"{EMOJI['folder']} Files"
+        self.current_path = Path.cwd()  # Start with current working directory
+        self.initial_path = Path.cwd()  # Store initial directory for reset
+        self.history_back = []  # History for back navigation
+        self.history_forward = []  # History for forward navigation
+        self._navigating = False  # Lock to prevent concurrent navigation
         
     def compose(self) -> ComposeResult:
         """Compose the file explorer."""
-        yield CustomDirectoryTree("./", id="file-tree")
+        # Navigation buttons
+        with Horizontal(id="nav-buttons"):
+            yield Button("↻", id="nav-refresh", variant="primary")
+            yield Button("↑", id="nav-up", variant="primary")
+            yield Button("←", id="nav-back", variant="primary")
+            yield Button("→", id="nav-forward", variant="primary")
+        
+        # Address bar input
+        address_input = Input(
+            placeholder="Enter path...",
+            value=str(self.current_path),
+            id="address-bar"
+        )
+        yield address_input
+        # Directory tree starting from current working directory
+        yield CustomDirectoryTree(str(self.current_path), id="file-tree")
+    
+    async def on_mount(self) -> None:
+        """Update button states on mount."""
+        self.update_nav_buttons()
+    
+    def update_nav_buttons(self) -> None:
+        """Update navigation button states based on history."""
+        try:
+            back_btn = self.query_one("#nav-back", Button)
+            back_btn.disabled = len(self.history_back) == 0
+        except Exception:
+            pass
+        
+        try:
+            forward_btn = self.query_one("#nav-forward", Button)
+            forward_btn.disabled = len(self.history_forward) == 0
+        except Exception:
+            pass
+    
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Handle address bar text changes - auto-navigate if valid path."""
+        if event.input.id != "address-bar":
+            return
+        
+        new_path = event.value.strip()
+        if not new_path:
+            return
+        
+        # Try to expand and resolve the path
+        try:
+            expanded_path = Path(new_path).expanduser().resolve()
+            
+            # Only auto-navigate if path exists and is a directory
+            if expanded_path.exists() and expanded_path.is_dir():
+                # Navigate without changing focus (keep focus on address bar)
+                self.run_worker(self.navigate_to_path(expanded_path, add_to_history=False, keep_focus_on_input=True))
+        except Exception:
+            # Invalid path - ignore
+            pass
+    
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle address bar submission - navigate and move focus to tree."""
+        if event.input.id != "address-bar":
+            return
+        
+        new_path = event.value.strip()
+        if not new_path:
+            return
+        
+        # Expand user home directory and resolve the path
+        try:
+            expanded_path = Path(new_path).expanduser().resolve()
+            
+            if not expanded_path.exists():
+                self.app.bell()
+                event.input.value = str(self.current_path)
+                return
+            
+            if not expanded_path.is_dir():
+                self.app.bell()
+                event.input.value = str(self.current_path)
+                return
+            
+            # Navigate to the new path (with history) and move focus to tree
+            await self.navigate_to_path(expanded_path, add_to_history=True, keep_focus_on_input=False)
+            
+        except Exception as e:
+            # Invalid path - reset to current path
+            self.app.bell()
+            event.input.value = str(self.current_path)
+    
+    async def navigate_to_path(self, new_path: Path, add_to_history: bool = True, keep_focus_on_input: bool = False) -> None:
+        """Navigate to a new directory path."""
+        # Prevent concurrent navigation
+        if self._navigating:
+            return
+        
+        self._navigating = True
+        
+        try:
+            # Add current path to back history if navigating to a different path
+            if add_to_history and new_path != self.current_path:
+                self.history_back.append(self.current_path)
+                self.history_forward.clear()  # Clear forward history on new navigation
+            
+            # Update the current path
+            self.current_path = new_path
+            
+            # Update address bar
+            try:
+                address_bar = self.query_one("#address-bar", Input)
+                address_bar.value = str(self.current_path)
+            except Exception:
+                pass
+            
+            # Remove old directory tree and create new one
+            try:
+                old_tree = self.query_one("#file-tree", CustomDirectoryTree)
+                await old_tree.remove()
+            except Exception:
+                pass
+            
+            # Mount new directory tree with the new path
+            new_tree = CustomDirectoryTree(str(self.current_path), id="file-tree")
+            await self.mount(new_tree)
+            
+            # Reload the tree to show contents
+            new_tree.reload()
+            
+            # Update navigation button states
+            self.update_nav_buttons()
+            
+            # Focus management
+            if not keep_focus_on_input:
+                # Focus the tree when explicitly navigating (Enter key, clicking folders/buttons)
+                # Use set_timer to ensure tree is fully loaded before focusing
+                def focus_tree_delayed():
+                    try:
+                        tree = self.query_one("#file-tree", CustomDirectoryTree)
+                        tree.focus()
+                        # Move cursor to the first item in the tree
+                        tree.cursor_line = 0
+                        tree.scroll_to_line(0)
+                    except Exception as e:
+                        pass
+                
+                self.set_timer(0.1, focus_tree_delayed)
+            # If keep_focus_on_input is True, don't change focus at all (typing in address bar)
+        finally:
+            self._navigating = False
+    
+    async def on_directory_tree_directory_selected(self, event: DirectoryTree.DirectorySelected) -> None:
+        """Handle directory selection in the tree."""
+        selected_path = Path(event.path)
+        # Navigate to the selected directory
+        await self.navigate_to_path(selected_path, add_to_history=True, keep_focus_on_input=False)
+        # Prevent default expansion behavior
+        event.stop()
+    
+    @on(Button.Pressed, "#nav-refresh")
+    async def action_refresh(self):
+        """Refresh to initial working directory."""
+        await self.navigate_to_path(self.initial_path, add_to_history=True, keep_focus_on_input=False)
+    
+    @on(Button.Pressed, "#nav-up")
+    async def action_go_up(self):
+        """Go up one directory level."""
+        parent = self.current_path.parent
+        if parent != self.current_path:  # Check we're not at root
+            await self.navigate_to_path(parent, add_to_history=True, keep_focus_on_input=False)
+    
+    @on(Button.Pressed, "#nav-back")
+    async def action_go_back(self):
+        """Go back to previous directory."""
+        if self.history_back:
+            # Move current to forward history
+            self.history_forward.append(self.current_path)
+            # Pop from back history
+            previous_path = self.history_back.pop()
+            await self.navigate_to_path(previous_path, add_to_history=False, keep_focus_on_input=False)
+    
+    @on(Button.Pressed, "#nav-forward")
+    async def action_go_forward(self):
+        """Go forward to next directory."""
+        if self.history_forward:
+            # Move current to back history
+            self.history_back.append(self.current_path)
+            # Pop from forward history
+            next_path = self.history_forward.pop()
+            await self.navigate_to_path(next_path, add_to_history=False, keep_focus_on_input=False)
 
 
 class StatusBar(Container):

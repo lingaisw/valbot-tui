@@ -2053,7 +2053,7 @@ class MainScreen(Screen):
         
     def compose(self) -> ComposeResult:
         """Compose the modern Material Design layout."""
-        yield Header(show_clock=True)
+        yield Header(show_clock=True, icon="☰")
         
         # File explorer overlay (appears on top when toggled)
         yield FileExplorerPanel(id="file-panel")

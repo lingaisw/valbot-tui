@@ -1096,7 +1096,7 @@ class ChatPanel(VerticalScroll):
 class CustomDirectoryTree(DirectoryTree):
     """Custom DirectoryTree with custom file icon."""
     
-    ICON_FILE = EMOJI['file']
+    ICON_FILE = f"{EMOJI['file']} "
 
 
 class FileExplorerPanel(Container):

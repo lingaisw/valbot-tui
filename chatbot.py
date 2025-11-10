@@ -199,16 +199,21 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
             potential_paths.extend(matches)
         
         # Check if any of these paths actually exist
-        valid_path_found = False
+        valid_files = []
         for path_str in potential_paths:
             try:
                 path = Path(path_str)
                 if path.exists() and path.is_file():
-                    valid_path_found = True
-                    self.console.print(f"[dim]✅ Found local file: [bold]{path_str}[/bold][/dim]")
-                    break
+                    valid_files.append(path_str)
             except:
                 continue
+        
+        # Print all found files in a single message
+        valid_path_found = len(valid_files) > 0
+        if valid_path_found:
+            files_str = ", ".join([f"[bold]{f}[/bold]" for f in valid_files])
+            file_word = "file" if len(valid_files) == 1 else "files"
+            self.console.print(f"✅ Found local {file_word}: {files_str}")
         
         # Check for file extensions or specific file references
         file_extensions = ['.py', '.js', '.ts', '.md', '.txt', '.json', '.yml', '.yaml', 

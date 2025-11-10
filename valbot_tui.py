@@ -278,6 +278,7 @@ class TUIConsoleWrapper:
         role = "assistant"
         if any(indicator in message for indicator in [
             "Found local file:",
+            "Found local files:",
             "Using tools",
             "→ Using tools",
             "Running agent with tools"
@@ -1153,7 +1154,7 @@ class FileExplorerPanel(Container):
     
     DEFAULT_CSS = """
     FileExplorerPanel {
-        width: 35;
+        width: 35%;
         height: 100%;
         background: $surface;
         border: solid $primary;
@@ -1228,6 +1229,7 @@ class FileExplorerPanel(Container):
             yield Button("↑", id="nav-up", variant="primary")
             yield Button("←", id="nav-back", variant="primary")
             yield Button("→", id="nav-forward", variant="primary")
+            yield Button("✕", id="nav-close", variant="primary")
         
         # Address bar input
         address_input = Input(
@@ -1408,6 +1410,11 @@ class FileExplorerPanel(Container):
             # Pop from forward history
             next_path = self.history_forward.pop()
             await self.navigate_to_path(next_path, add_to_history=False, keep_focus_on_input=False)
+    
+    @on(Button.Pressed, "#nav-close")
+    def action_close_explorer(self):
+        """Close the file explorer panel."""
+        self.remove_class("visible")
 
 
 class StatusBar(Container):
@@ -4859,11 +4866,11 @@ Falling back to standard chat...
             if current_text:
                 # Add space before the path only if current text does not end with whitespace
                 if not current_text[-1].isspace():
-                    command_input.insert(f" {relative_path}")
+                    command_input.insert(f" {relative_path} ")
                 else:
-                    command_input.insert(relative_path)
+                    command_input.insert(f"{relative_path} ")
             else:
-                command_input.insert(relative_path)
+                command_input.insert(f"{relative_path} ")
             
             # Close the file explorer
             self.action_toggle_files()

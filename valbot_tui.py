@@ -1199,7 +1199,7 @@ class FileExplorerPanel(Container):
     
     #address-bar {
         width: 100%;
-        height: 2;
+        height: 1;
         margin-bottom: 1;
         padding: 0 1;
         background: $panel;

@@ -71,12 +71,19 @@ This TUI implementation includes all major features from the CLI version:
    - Smooth animations
    - Responsive layout
    - Keyboard shortcuts
+
+✅ Theme Persistence:
+   - Theme changes are automatically saved to ~/.valbot_tui_theme_config.json
+   - Saved theme is loaded on startup
+   - Use Ctrl+P (command palette) to change themes
+   - Supports all Textual built-in themes plus custom ValBot theme
 """
 
 import asyncio
 import sys
 import re
 import glob
+import json
 from datetime import datetime
 from typing import Optional, List
 from pathlib import Path
@@ -159,6 +166,34 @@ else:
         'file': '📄',
         'keyboard': '⌨️',
     }
+
+
+# Theme persistence configuration file path
+THEME_CONFIG_PATH = Path.home() / ".valbot_tui_theme_config.json"
+
+
+def save_theme_config(theme_name: str) -> None:
+    """Save the current theme to the config file."""
+    try:
+        config = {"theme": theme_name}
+        with open(THEME_CONFIG_PATH, 'w') as f:
+            json.dump(config, f, indent=2)
+    except Exception as e:
+        # Silently fail if we can't save the theme config
+        pass
+
+
+def load_theme_config() -> Optional[str]:
+    """Load the saved theme from the config file."""
+    try:
+        if THEME_CONFIG_PATH.exists():
+            with open(THEME_CONFIG_PATH, 'r') as f:
+                config = json.load(f)
+                return config.get("theme")
+    except Exception as e:
+        # Silently fail if we can't load the theme config
+        pass
+    return None
 
 
 # Register custom ValBot dark theme
@@ -4690,7 +4725,17 @@ class ValbotTUI(App):
         utilities.set_config_manager(self.config_manager)
         # Register and use the custom valbot-dark theme
         self.register_theme(VALBOT_DARK_THEME)
-        self.theme = "valbot-dark (default)"
+        
+        # Load saved theme from config file, or use default
+        saved_theme = load_theme_config()
+        if saved_theme and saved_theme in self.available_themes:
+            self.theme = saved_theme
+        else:
+            self.theme = "valbot-dark (default)"
+    
+    def watch_theme(self, new_theme: str) -> None:
+        """Watch for theme changes and save to config file."""
+        save_theme_config(new_theme)
         
     def on_mount(self) -> None:
         """Set up the application after mounting."""

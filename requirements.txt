@@ -67,7 +67,7 @@ PyJWT==2.10.1
 PyPDF2==3.0.1
 pyspnego==0.12.0
 python-dateutil==2.9.0.post0
-python-dotenv==1.1.0
+dotenv==1.1.0
 PyYAML==6.0.2
 readchar==4.2.1
 regex==2024.11.6
@@ -84,9 +84,10 @@ socksio==1.0.0
 soupsieve==2.6
 sse-starlette==2.2.1
 starlette==0.46.1
-textual
+textual>=0.38.0
 textual-dev
 tiktoken==0.9.0
+pyperclip
 tokenizers==0.21.1
 tqdm==4.67.1
 types-requests==2.32.0.20250328

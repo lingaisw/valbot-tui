@@ -1093,6 +1093,12 @@ class ChatPanel(VerticalScroll):
         for widget in self.query("ChatTerminalOutput"):
             widget.remove()
 
+class CustomDirectoryTree(DirectoryTree):
+    """Custom DirectoryTree with custom file icon."""
+    
+    ICON_FILE = EMOJI['file']
+
+
 class FileExplorerPanel(Container):
     """Material Design file system navigation panel."""
     
@@ -1123,7 +1129,7 @@ class FileExplorerPanel(Container):
         
     def compose(self) -> ComposeResult:
         """Compose the file explorer."""
-        yield DirectoryTree("./", id="file-tree")
+        yield CustomDirectoryTree("./", id="file-tree")
 
 
 class StatusBar(Container):

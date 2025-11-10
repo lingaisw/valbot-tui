@@ -133,7 +133,7 @@ if IS_LINUX:
     # ASCII symbols for Linux
     EMOJI = {
         'checkmark': '✓',
-        'clipboard': '[>_]',
+        'clipboard': '\\[>_]',
         'info': 'ℹ️',
         'lightbulb': '◐',
         'robot': '⚞⚟',
@@ -558,11 +558,21 @@ class ChatMessage(Container):
         Strips all Rich formatting and converts styles to markdown.
         
         Strategy:
-        1. Convert style tags (bold, italic) to markdown
-        2. Remove all color/style tags completely
-        3. Clean up any remaining Rich markup
+        1. Protect escaped brackets (\\[) by temporarily replacing them
+        2. Convert style tags (bold, italic) to markdown
+        3. Remove all color/style tags completely
+        4. Clean up any remaining Rich markup
+        5. Restore escaped brackets as literal text
         """
-        # First pass: Handle [bold ...] tags with any modifiers (colors, etc.)
+        # Step 1: Protect escaped brackets by replacing them with placeholders
+        # This prevents \\[bold] from being processed as Rich markup
+        ESCAPED_OPEN_PLACEHOLDER = "\x00ESCAPED_OPEN_BRACKET\x00"
+        ESCAPED_CLOSE_PLACEHOLDER = "\x00ESCAPED_CLOSE_BRACKET\x00"
+        
+        content = content.replace(r'\[', ESCAPED_OPEN_PLACEHOLDER)
+        content = content.replace(r'\]', ESCAPED_CLOSE_PLACEHOLDER)
+        
+        # Step 2: Handle [bold ...] tags with any modifiers (colors, etc.)
         # Use a more aggressive pattern that captures the style word and ignores everything after
         # Match: [bold ...] content [/bold ...] OR [bold ...] content [/]
         
@@ -584,10 +594,14 @@ class ChatMessage(Container):
         content = re.sub(r'\[dim[^\]]*\](.*?)\[/dim[^\]]*\]', replace_dim, content, flags=re.IGNORECASE | re.DOTALL)
         content = re.sub(r'\[dim[^\]]*\](.*?)\[/\]', replace_dim, content, flags=re.IGNORECASE | re.DOTALL)
         
-        # Second pass: Remove ALL remaining Rich markup tags
+        # Step 3: Remove ALL remaining Rich markup tags
         # This includes colors, standalone styles, and any other Rich tags
         # Match any [tag] or [tag something] pattern
         content = re.sub(r'\[[^\]]+\]', '', content)
+        
+        # Step 4: Restore escaped brackets as literal brackets (without backslash)
+        content = content.replace(ESCAPED_OPEN_PLACEHOLDER, '[')
+        content = content.replace(ESCAPED_CLOSE_PLACEHOLDER, ']')
         
         return content
     

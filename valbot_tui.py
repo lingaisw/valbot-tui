@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 ValBot TUI - A Modern Material Design Terminal Interface for ValBot
 Inspired by Charm's Crush interface with beautiful gradients and sleek styling
@@ -121,6 +122,49 @@ import sys
 import os
 import tempfile
 import subprocess
+
+
+# Platform-specific emoji/symbol mapping
+print(sys.platform)
+IS_LINUX = sys.platform.startswith('linux')
+
+# Define emoji mappings based on platform
+if IS_LINUX:
+    # ASCII symbols for Linux
+    EMOJI = {
+        'checkmark': '[✓]',
+        'rocket': '',
+        'clipboard': '\\[i]',
+        'info': '\\[i]',
+        'lightbulb': '[?]',
+        'robot': '[>_]',
+        'user': '▶',
+        'cross': '\\[X]',
+        'folder': '▚',
+        'lightning': '[#]',
+        'gear': '◆',
+        'success': '[OK]',
+        'file': '▙',
+        'keyboard': '[KB]',
+    }
+else:
+    # Unicode emojis for Windows/Mac
+    EMOJI = {
+        'checkmark': '✅',
+        'rocket': '🚀',
+        'clipboard': '📋',
+        'info': 'ℹ️',
+        'lightbulb': '💡',
+        'robot': '🤖',
+        'user': '👤',
+        'cross': '❌',
+        'folder': '📁',
+        'lightning': '⚡',
+        'gear': '⚙️',
+        'success': '✅',
+        'file': '📄',
+        'keyboard': '⌨️',
+    }
 
 
 # Register custom ValBot dark theme
@@ -280,7 +324,7 @@ class TUIConsoleWrapper:
         # Check if header should be shown
         show_header = not self.chat_panel._assistant_header_shown
         self.chat_panel._assistant_header_shown = True
-        self._current_msg = ChatMessage("assistant", "🤖 Agent is working...", show_header=show_header)
+        self._current_msg = ChatMessage("assistant", f"{EMOJI['robot']} Agent is working...", show_header=show_header)
         self.chat_panel.mount(self._current_msg)
         self.chat_panel.scroll_end(animate=False)
         
@@ -357,7 +401,7 @@ class CodeBlockHeader(Container):
             import pyperclip
             pyperclip.copy(self.code)
             btn = self.query_one("#copy-btn", Button)
-            btn.label = "✅"
+            btn.label = EMOJI['success']
             await asyncio.sleep(2)
             btn.label = "Copy"
         except ImportError:
@@ -407,7 +451,7 @@ class CopyButton(Static):
             import pyperclip
             pyperclip.copy(self.code_content)
             # Show success state
-            self.label = "✅"
+            self.label = EMOJI['success']
             self.add_class("success")
             self.refresh()
             # Reset after 1.5 seconds
@@ -473,6 +517,36 @@ class ChatMessage(Container):
     
     can_focus = False  # Prevent focus/selection
     
+    @staticmethod
+    def _convert_rich_markup_to_markdown(content: str) -> str:
+        """
+        Convert Rich markup tags to markdown equivalents where possible.
+        This allows both Rich-style tags and markdown to work together.
+        
+        Conversions:
+        - [bold]text[/bold] or [bold]text[/] → **text**
+        - [italic]text[/italic] or [italic]text[/] → *text*
+        - [dim]text[/dim] or [dim]text[/] → _text_ (closest markdown equivalent)
+        - Color tags are removed (can't be represented in markdown)
+        """
+        # Convert [bold]...[/bold] or [bold]...[/] to **text**
+        content = re.sub(r'\[bold\](.*?)\[/(?:bold)?\]', r'**\1**', content, flags=re.IGNORECASE)
+        
+        # Convert [italic]...[/italic] or [italic]...[/] to *text*
+        content = re.sub(r'\[italic\](.*?)\[/(?:italic)?\]', r'*\1*', content, flags=re.IGNORECASE)
+        
+        # Convert [dim]...[/dim] or [dim]...[/] to _text_ (markdown emphasis as closest equivalent)
+        content = re.sub(r'\[dim\](.*?)\[/(?:dim)?\]', r'_\1_', content, flags=re.IGNORECASE)
+        
+        # Remove color tags since markdown doesn't support colors
+        # Match patterns like [red], [green], [#ff0000], [rgb(255,0,0)], etc.
+        content = re.sub(r'\[(?:red|green|blue|yellow|cyan|magenta|white|black|orange|purple|pink|deep_pink|grey\d+|color\d+|#[0-9a-fA-F]{6}|rgb\(\d+,\d+,\d+\))(?:\s+on\s+\w+)?\]', '', content, flags=re.IGNORECASE)
+        
+        # Remove closing tags [/] or [/color]
+        content = re.sub(r'\[/[^\]]*\]', '', content)
+        
+        return content
+    
     def __init__(self, role: str, content: str, timestamp: Optional[datetime] = None, show_header: bool = True, agent_name: Optional[str] = None):
         super().__init__()
         self.role = role
@@ -482,45 +556,13 @@ class ChatMessage(Container):
         self._header_widget = None  # Store header widget reference
         self._content_widget = None  # Store content widget reference
         
-        # Detect if content contains Rich markup (for colored output)
-        # BUT: Always prefer Markdown rendering if content contains code blocks
-        # This ensures code blocks from agents are properly formatted
-        has_code_blocks = bool(re.search(r'```', content))
+        # Convert Rich markup to markdown equivalents for assistant/agent/system messages
+        # Don't convert for user messages to avoid breaking expressions like 2*2*2
+        if role != "user":
+            content = self._convert_rich_markup_to_markdown(content)
         
-        # Check for actual Rich markup tags (not just any square brackets)
-        # Rich markup includes many patterns:
-        # - Styles: bold, italic, underline (u/uu), strike, dim, etc.
-        # - Colors: red, green, blue, cyan, magenta, yellow, white, black
-        # - Extended colors: orange, purple, pink, deep_pink, etc.
-        # - Numbered colors: grey74, color123, or bare numbers
-        # - Hex colors: #ff0000
-        # - RGB colors: rgb(255,0,0)
-        # - Backgrounds: on red, on blue, etc.
-        # - Combined: bold red, italic blue on white, etc.
-        # - Special: link, blink, reverse, conceal, frame, encircle, overline
-        # Match opening tags [style], closing tags [/style] or [/]
-        rich_markup_pattern = r'\[/?(?:link(?:=\S+)?|bold|italic|underline|u|uu|o|strike|blink|reverse|conceal|dim|frame|encircle|not\s+)?(?:bright_)?(?:white|black|red|green|yellow|blue|magenta|cyan|orange|purple|pink|deep_pink|grey\d+|color\d+|rgb\(\d+,\d+,\d+\)|\d+|#[0-9a-fA-F]{3,6})?(?:\s+(?:on\s+)?(?:bright_)?(?:white|black|red|green|yellow|blue|magenta|cyan|orange|purple|pink|grey\d+|color\d+|rgb\(\d+,\d+,\d+\)|\d+|#[0-9a-fA-F]{3,6}))?\]'
-        has_rich_markup_tags = bool(re.search(rich_markup_pattern, content, re.IGNORECASE))
-        
-        # Use Rich markup only if:
-        # 1. Content has actual Rich markup tags (not just any square brackets)
-        # 2. Content does NOT have code blocks (code blocks should use Markdown)
-        self.has_rich_markup = has_rich_markup_tags and not has_code_blocks
-        
-        # For user messages without Rich markup, escape the content to prevent Markdown interpretation
-        # This ensures user input like "2*2*2" displays literally as "2*2*2"
-        # BUT: Don't escape if content is already wrapped in backticks (for command highlighting)
-        if role == "user" and not self.has_rich_markup and not has_code_blocks:
-            # Check if content is wrapped in backticks (for command display)
-            is_wrapped_in_backticks = content.startswith('`') and content.endswith('`')
-            if is_wrapped_in_backticks:
-                # Already formatted for display, don't escape
-                self.content = content
-            else:
-                # Escape markdown special characters
-                self.content = content.replace('*', r'\*').replace('_', r'\_').replace('`', r'\`')
-        else:
-            self.content = content
+        # Store the content
+        self.content = content
         
         # Apply role-specific styling
         if role == "user":
@@ -534,34 +576,32 @@ class ChatMessage(Container):
     
     def update_content(self, new_content: str):
         """Update the message content and refresh the display properly."""
+        # Convert Rich markup to markdown for non-user messages
+        if self.role != "user":
+            new_content = self._convert_rich_markup_to_markdown(new_content)
         self.content = new_content
         
-        # Recalculate has_rich_markup based on new content using the same logic as __init__
-        has_code_blocks = bool(re.search(r'```', new_content))
-        # Use the same comprehensive pattern as in __init__ - must match exactly
-        rich_markup_pattern = r'\[/?(?:link(?:=\S+)?|bold|italic|underline|u|uu|o|strike|blink|reverse|conceal|dim|frame|encircle|not\s+)?(?:bright_)?(?:white|black|red|green|yellow|blue|magenta|cyan|orange|purple|pink|deep_pink|grey\d+|color\d+|rgb\(\d+,\d+,\d+\)|\d+|#[0-9a-fA-F]{3,6})?(?:\s+(?:on\s+)?(?:bright_)?(?:white|black|red|green|yellow|blue|magenta|cyan|orange|purple|pink|grey\d+|color\d+|rgb\(\d+,\d+,\d+\)|\d+|#[0-9a-fA-F]{3,6}))?\]'
-        has_rich_markup_tags = bool(re.search(rich_markup_pattern, new_content, re.IGNORECASE))
-        self.has_rich_markup = has_rich_markup_tags and not has_code_blocks
-        
-        # Update the content widget directly instead of recomposing
+        # Update the appropriate widget based on role
         try:
-            if self.has_rich_markup:
+            if self.role == "user":
+                # User messages use plain Static widget
                 content_widget = self.query_one(".message-content", Static)
                 content_widget.update(new_content)
             else:
+                # Other messages use Markdown widget
                 content_widget = self.query_one(".message-content", Markdown)
                 content_widget.update(new_content)
         except Exception:
-            # If widgets don't exist yet, do a full refresh
+            # If widget doesn't exist yet, do a full refresh
             self.refresh(recompose=True)
         
     def compose(self) -> ComposeResult:
         """Compose the message display with markdown."""
         role_icons = {
-            "user": "👤",
-            "assistant": "🤖",
-            "system": "ℹ️",
-            "error": "❌"
+            "user": EMOJI['user'],
+            "assistant": EMOJI['robot'],
+            "system": EMOJI['info'],
+            "error": EMOJI['cross']
         }
         
         role_labels = {
@@ -592,12 +632,15 @@ class ChatMessage(Container):
                 self._header_widget = Static(header, classes="message-header", markup=True)
             yield self._header_widget
         
-        # Use Static with markup=True for Rich-formatted content (supports colors)
-        # Otherwise use Markdown for standard markdown rendering
+        # Create content widget based on role:
+        # - User messages: Use plain Static (no markdown rendering) to preserve exact input like 2*2*2
+        # - Other messages: Use Markdown for rich formatting (with Rich markup converted to markdown)
         if self._content_widget is None:
-            if self.has_rich_markup:
-                self._content_widget = Static(self.content, classes="message-content", markup=True)
+            if self.role == "user":
+                # Plain text for user messages - no markdown or markup processing
+                self._content_widget = Static(self.content, classes="message-content")
             else:
+                # Markdown for assistant/system/error messages
                 self._content_widget = Markdown(self.content, classes="message-content")
         yield self._content_widget
     
@@ -767,7 +810,7 @@ class ChatTerminalOutput(Static):
     def __init__(self, command: str, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.command = command
-        self.border_title = "⚡ Terminal"
+        self.border_title = f"{EMOJI['lightning']} Terminal"
         self.terminal_manager = TerminalManager()
         
     def compose(self) -> ComposeResult:
@@ -941,7 +984,7 @@ class FileExplorerPanel(Container):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.border_title = "📁 Files"
+        self.border_title = f"{EMOJI['folder']} Files"
         
     def compose(self) -> ComposeResult:
         """Compose the file explorer."""
@@ -984,14 +1027,14 @@ class StatusBar(Container):
     def compose(self) -> ComposeResult:
         """Compose the status bar with model button."""
         display_name = self._truncate_model_name(self.model_name)
-        yield Button(f"{display_name} ⚙️", id="model-button")
+        yield Button(f"{display_name} {EMOJI['gear']}", id="model-button")
     
     def watch_model_name(self, new_model: str) -> None:
         """Update button label when model changes."""
         try:
             button = self.query_one("#model-button", Button)
             display_name = self._truncate_model_name(new_model)
-            button.label = f"{display_name} ⚙️"
+            button.label = f"{display_name} {EMOJI['gear']}"
         except Exception:
             pass
     
@@ -1357,7 +1400,7 @@ class AutocompleteOverlay(Container):
         height: auto;
         max-height: 20;
         dock: bottom;
-        offset-y: -6;
+        offset-y: -8;
         background: $surface;
         padding: 0;
         display: none;
@@ -1394,7 +1437,7 @@ class AutocompleteOverlay(Container):
         super().__init__(*args, **kwargs)
         self._commands = []
         self._option_list = None
-        self.border_title = "💡 Suggestions"
+        self.border_title = f"{EMOJI['lightbulb']} Suggestions"
     
     def compose(self) -> ComposeResult:
         """Compose the overlay contents."""
@@ -1627,9 +1670,9 @@ class MainScreen(Screen):
     def show_welcome_message(self):
         """Display the welcome message."""
         chat_panel = self.query_one("#chat-panel", ChatPanel)
-        welcome = """# 🚀 Welcome to ValBot TUI
+        welcome = f"""# {EMOJI['rocket']} Welcome to ValBot TUI
 
-### 📋 Available Commands
+### {EMOJI['clipboard']} Available Commands
 
 Type `/help` for complete list of commands, or try these:
 
@@ -1641,13 +1684,13 @@ Type `/help` for complete list of commands, or try these:
 - `/terminal <cmd>` - Run shell commands
 
 
-### ℹ️ Tips
+### {EMOJI['info']} Tips
 - Reference local files directly in chat
 - Press `TAB` to autocomplete file paths
 - Change themes from pallete
 
 
-### 💡 Getting Started
+### {EMOJI['lightbulb']} Getting Started
 
 Type your message and press **Enter** to chat with ValBot!
 
@@ -1696,7 +1739,7 @@ Try:
             
         except Exception as e:
             chat_panel = self.query_one("#chat-panel", ChatPanel)
-            chat_panel.add_message("error", f"""## ❌ Initialization Error
+            chat_panel.add_message("error", f"""## {EMOJI['cross']} Initialization Error
 
 Failed to initialize chatbot:
 
@@ -1828,7 +1871,7 @@ Please check your configuration and try again.
         # Format matches for display
         formatted_matches = []
         for display_name, completion, is_dir in matches:
-            desc = "📁 Directory" if is_dir else "📄 File"
+            desc = f"{EMOJI['folder']} Directory" if is_dir else f"{EMOJI['file']} File"
             formatted_matches.append((completion, desc))
         
         # Store the current word info for completion
@@ -2336,7 +2379,7 @@ Please check your configuration and try again.
                     agent_options = [(f"{name}: {desc}", name) for name, desc in agents]
                     
                     # Show the inline picker first
-                    await self.show_inline_picker("🤖 Select Agent Workflow", agent_options)
+                    await self.show_inline_picker(f"{EMOJI['robot']} Select Agent Workflow", agent_options)
                     
                     # Store callback for when selection is made (after picker is shown)
                     self._picker_callback = on_agent_selected
@@ -2378,7 +2421,7 @@ Please check your configuration and try again.
                 # Reset conversation ID to start fresh backend session
                 self.chatbot._conversation_id = None
             
-            chat_panel.add_message("system", "✅ Started new chat.")
+            chat_panel.add_message("system", f"{EMOJI['checkmark']} Started new chat.")
             return
             
         elif cmd == "/help":
@@ -2405,7 +2448,7 @@ For more detailed help, try the CLI mode with `--help` flag.
             return
             
         elif cmd == "/settings":
-            chat_panel.add_message("system", """## ⚙️ Settings
+            chat_panel.add_message("system", """## {EMOJI['gear']} Settings
 
 Settings management is available in CLI mode only.
 To modify settings, exit TUI and run:
@@ -2430,7 +2473,7 @@ Use `/model` to change the current model.
                     self.chatbot.command_manager.handle_command(command)
                     return
                 except Exception as e:
-                    chat_panel.add_message("error", f"""## ❌ Command Error
+                    chat_panel.add_message("error", f"""## {EMOJI['cross']} Command Error
 
 Error executing command `{cmd}`:
 
@@ -2485,7 +2528,7 @@ Error executing command `{cmd}`:
 - `/reload` - Reinitialize chatbot with current configuration
 - `/update` - Check for updates (see instructions)
 
-## ⌨️ Keyboard Shortcuts
+## {EMOJI['keyboard']} Keyboard Shortcuts
 
 | Shortcut | Action | Description |
 |----------|--------|-------------|
@@ -2549,7 +2592,7 @@ ValBot supports custom prompts defined in your config file. These are shortcuts 
 }
 ```
 
-## 🤖 Agent Plugins
+## {EMOJI['robot']} Agent Plugins
 
 Agents are powerful workflows that can perform complex tasks:
 
@@ -2622,7 +2665,7 @@ Edit `user_config.json` to customize your experience:
 Need more help? Just ask ValBot directly!
 
 ---
-**ValBot TUI** - Your AI-Powered Assistant 🚀
+**ValBot TUI** - Your AI-Powered Assistant {EMOJI['rocket']}
 """
             chat_panel.add_message("system", help_text)
                 
@@ -2630,7 +2673,7 @@ Need more help? Just ask ValBot directly!
             if args:
                 await chat_panel.add_terminal_output(args)
             else:
-                chat_panel.add_message("system", """## ⚡ Terminal Command
+                chat_panel.add_message("system", """## {EMOJI['lightning']} Terminal Command
 
 **Usage**: `/terminal <command>`
 
@@ -2685,11 +2728,11 @@ Need more help? Just ask ValBot directly!
 """
                             chat_panel.add_message("system", formatted_content)
                     else:
-                        chat_panel.add_message("error", f"❌ File not found: `{args}`")
+                        chat_panel.add_message("error", f"{EMOJI['cross']} File not found: `{args}`")
                 except MemoryError:
-                    chat_panel.add_message("error", f"❌ Memory error: File too large to read")
+                    chat_panel.add_message("error", f"{EMOJI['cross']} Memory error: File too large to read")
                 except Exception as e:
-                    chat_panel.add_message("error", f"❌ Error reading file: {str(e)}")
+                    chat_panel.add_message("error", f"{EMOJI['cross']} Error reading file: {str(e)}")
             else:
                 chat_panel.add_message("system", "**Usage**: `/file <path>`\n\nExample: `/file ./config.py`")
         
@@ -2720,9 +2763,9 @@ Loaded {len(files)} file(s) into conversation context:
 You can now ask questions about these files!
 """)
                     else:
-                        chat_panel.add_message("error", f"❌ No files found matching: `{args}`")
+                        chat_panel.add_message("error", f"{EMOJI['cross']} No files found matching: `{args}`")
                 except Exception as e:
-                    chat_panel.add_message("error", f"❌ Error loading context: {str(e)}")
+                    chat_panel.add_message("error", f"{EMOJI['cross']} Error loading context: {str(e)}")
             else:
                 chat_panel.add_message("system", """## 📂 Load Context
 
@@ -2771,10 +2814,10 @@ Default: vim (Linux/Mac) or notepad (Windows)
                     chat_panel.add_message("system", "No content entered.")
                     
             except Exception as e:
-                chat_panel.add_message("error", f"❌ Error with multi-line input: {str(e)}")
+                chat_panel.add_message("error", f"{EMOJI['cross']} Error with multi-line input: {str(e)}")
         
         elif cmd == "/settings":
-            chat_panel.add_message("system", """## ⚙️ Settings
+            chat_panel.add_message("system", """## {EMOJI['gear']} Settings
 
 The settings TUI is not yet available in this version.
 
@@ -2798,9 +2841,9 @@ Reinitializing chatbot with current settings...
 """)
             try:
                 await self.initialize_chatbot()
-                chat_panel.add_message("system", "✅ ChatBot reinitialized with current configuration!")
+                chat_panel.add_message("system", f"{EMOJI['checkmark']} ChatBot reinitialized with current configuration!")
             except Exception as e:
-                chat_panel.add_message("error", f"❌ Error reinitializing: {str(e)}")
+                chat_panel.add_message("error", f"{EMOJI['cross']} Error reinitializing: {str(e)}")
         
         elif cmd == "/update":
             chat_panel.add_message("system", """## 📦 Check for Updates
@@ -2817,7 +2860,7 @@ Or use the CLI version with: `python app.py` and run `/update`
 """)
                 
         else:
-            chat_panel.add_message("error", f"❌ Unknown command: `{cmd}`\n\nType `/help` for available commands.")
+            chat_panel.add_message("error", f"{EMOJI['cross']} Unknown command: `{cmd}`\n\nType `/help` for available commands.")
     
     def _run_add_agent_in_thread(self, args: str):
         """Run /add_agent in a separate thread with monkey patches (not @work decorator)."""
@@ -2997,11 +3040,11 @@ Or use the CLI version with: `python app.py` and run `/update`
             self.app.call_from_thread(
                 chat_panel.add_message,
                 "system",
-                "✅ Agent added successfully! Run `/reload` to load the new agent."
+                f"{EMOJI['checkmark']} Agent added successfully! Run `/reload` to load the new agent."
             )
             
         except Exception as e:
-            error_details = f"❌ Error adding agent: {str(e)}\n\n```\n{traceback.format_exc()}\n```"
+            error_details = f"{EMOJI['cross']} Error adding agent: {str(e)}\n\n```\n{traceback.format_exc()}\n```"
             self.app.call_from_thread(
                 chat_panel.add_message,
                 "error",
@@ -3205,11 +3248,11 @@ Or use the CLI version with: `python app.py` and run `/update`
             self.app.call_from_thread(
                 chat_panel.add_message,
                 "system",
-                "✅ Tool added successfully! Run `/reload` to load the new tool."
+                f"{EMOJI['checkmark']} Tool added successfully! Run `/reload` to load the new tool."
             )
             
         except Exception as e:
-            error_details = f"❌ Error adding tool: {str(e)}\n\n```\n{traceback.format_exc()}\n```"
+            error_details = f"{EMOJI['cross']} Error adding tool: {str(e)}\n\n```\n{traceback.format_exc()}\n```"
             self.app.call_from_thread(
                 chat_panel.add_message,
                 "error",
@@ -3605,7 +3648,7 @@ Or use the CLI version with: `python app.py` and run `/update`
         self.app.call_from_thread(
             chat_panel.add_message, 
             "system", 
-            f"🤖 Running agent: **{agent_name}**\n\n[dim]{agent_desc}[/dim]"
+            f"{EMOJI['robot']} Running agent: **{agent_name}**\n\n[dim]{agent_desc}[/dim]"
         )
         
         # Set the current agent in the chat panel
@@ -4262,7 +4305,7 @@ Falling back to standard chat...
                 # Format agents for display: show name and description
                 agent_options = [(f"{name}: {desc}", name) for name, desc in agents]
                 # Show the inline picker first (with 'agent' type for tracking)
-                await self.show_inline_picker("🤖 Select Agent Workflow", agent_options, picker_type="agent")
+                await self.show_inline_picker(f"{EMOJI['robot']} Select Agent Workflow", agent_options, picker_type="agent")
                 # Store callback for when selection is made (after picker is shown)
                 self._picker_callback = on_agent_selected
             else:
@@ -4310,7 +4353,7 @@ Falling back to standard chat...
         model_options = [(f"{name}", name) for name in model_names]
         
         # Show the inline picker first (with 'model' type for tracking)
-        await self.show_inline_picker("🤖 Select AI Model", model_options, picker_type="model")
+        await self.show_inline_picker(f"{EMOJI['robot']} Select AI Model", model_options, picker_type="model")
         
         # Store callback for when selection is made (after picker is shown)
         self._picker_callback = handle_model_selection
@@ -4345,7 +4388,7 @@ Falling back to standard chat...
             chat_panel.add_message("system", f"✅ Chat saved to `{log_filepath}`")
             
         except Exception as e:
-            chat_panel.add_message("error", f"❌ Failed to save chat: {str(e)}")
+            chat_panel.add_message("error", f"{EMOJI['cross']} Failed to save chat: {str(e)}")
     
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
         """Handle click on a file in the directory tree.
@@ -4478,6 +4521,30 @@ class ValbotTUI(App):
 def main():
     """Main entry point for the TUI application."""
     import argparse
+    import locale
+    
+    # Force UTF-8 encoding for UNIX systems to properly display emojis
+    try:
+        # Set locale to UTF-8 if available
+        locale.setlocale(locale.LC_ALL, '')
+        
+        # For Python 3.7+, ensure UTF-8 mode is enabled
+        if sys.version_info >= (3, 7):
+            # Set environment variables before any I/O operations
+            import os
+            os.environ['PYTHONIOENCODING'] = 'utf-8'
+            
+            # Reconfigure stdout/stderr for UTF-8
+            if hasattr(sys.stdout, 'reconfigure'):
+                sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            if hasattr(sys.stderr, 'reconfigure'):
+                sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except (locale.Error, Exception) as e:
+        # Fallback if locale setting fails
+        import os
+        os.environ['LANG'] = 'en_US.UTF-8'
+        os.environ['LC_ALL'] = 'en_US.UTF-8'
+        pass
     
     parser = argparse.ArgumentParser(description="ValBot TUI - Terminal User Interface")
     parser.add_argument("--config", type=str, help="Path to custom configuration file")

@@ -2,6 +2,11 @@
 # ValBot TUI Launcher for Unix/Linux/macOS
 # This script launches the Terminal User Interface version of ValBot
 
+# Force UTF-8 encoding for proper emoji display
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+export PYTHONIOENCODING=utf-8
+
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -37,11 +42,16 @@ else
     echo "Running with system Python..."
 fi
 
-# Launch the TUI
-echo "Starting ValBot TUI..."
-python3 valbot_tui_launcher.py "$@"
+# Launch the TUI in a new xterm window
+echo "Starting ValBot TUI in new terminal..."
+xterm -e bash -c "
+    # Re-activate virtual environment in the new terminal
+    if [ $VENV_FOUND -eq 1 ]; then
+        source '$VENV_PATH/bin/activate'
+    fi
+    
+    # Launch the TUI
+    python3 '$SCRIPT_DIR/valbot_tui_launcher.py' $@
+" &
 
-# Deactivate virtual environment if it was activated
-if [ -n "$VIRTUAL_ENV" ]; then
-    deactivate
-fi
+echo "ValBot TUI launched in new terminal window (PID: $!)"

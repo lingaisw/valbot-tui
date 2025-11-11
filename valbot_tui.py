@@ -2816,6 +2816,21 @@ Please check your configuration and try again.
             self.app.exit()
             return
         
+        elif cmd == "/reload":
+            # Handle /reload BEFORE CommandManager to avoid blocking Confirm.ask()
+            chat_panel.add_message("system", """## 🔄 Reload Configuration
+
+Restarting TUI to reload configuration...
+""")
+            # Set restart flag and schedule exit
+            self.app.should_restart = True
+            
+            def do_restart():
+                self.app.exit()
+            
+            self.set_timer(0.5, do_restart)
+            return  # Return immediately after scheduling
+        
         elif cmd == "/agent":
             # Override CLI's agent command with TUI-specific inline picker
             if self.chatbot and hasattr(self.chatbot, 'plugin_manager'):
@@ -3294,17 +3309,6 @@ You can manually edit your configuration file at:
 - `general.ascii_banner_size` - Banner size
 - `general.display_commands_on_startup` - Show commands on start
 """)
-        
-        elif cmd == "/reload":
-            chat_panel.add_message("system", """## 🔄 Reload Configuration
-
-Reinitializing chatbot with current settings...
-""")
-            try:
-                await self.initialize_chatbot()
-                chat_panel.add_message("system", f"{EMOJI['checkmark']} ChatBot reinitialized with current configuration!")
-            except Exception as e:
-                chat_panel.add_message("error", f"{EMOJI['cross']} Error reinitializing: {str(e)}")
         
         elif cmd == "/update":
             chat_panel.add_message("system", """## 📦 Check for Updates
@@ -4975,6 +4979,7 @@ class ValbotTUI(App):
         super().__init__()
         self.config_manager = ConfigManager(config_path)
         utilities.set_config_manager(self.config_manager)
+        self.should_restart = False  # Flag to trigger restart
         # Register and use the custom valbot-dark theme
         self.register_theme(VALBOT_DARK_THEME)
         
@@ -5026,12 +5031,20 @@ def main():
     parser.add_argument("--config", type=str, help="Path to custom configuration file")
     args = parser.parse_args()
     
-    try:
-        app = ValbotTUI(config_path=args.config)
-        app.run()
-    except KeyboardInterrupt:
-        print("\nExiting...")
-        sys.exit(0)
+    while True:
+        try:
+            app = ValbotTUI(config_path=args.config)
+            app.run()
+            
+            # Check if we should restart
+            if app.should_restart:
+                print("\n🔄 Restarting TUI...\n")
+                continue
+            else:
+                break
+        except KeyboardInterrupt:
+            print("\nExiting...")
+            sys.exit(0)
 
 
 if __name__ == "__main__":

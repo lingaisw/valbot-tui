@@ -2831,6 +2831,22 @@ Restarting TUI to reload configuration...
             self.set_timer(0.5, do_restart)
             return  # Return immediately after scheduling
         
+        elif cmd == "/update":
+            # Handle /update by closing TUI and running CLI updater
+            chat_panel.add_message("system", """## 🔄 Update ValBot
+
+Closing TUI to run updater in CLI mode...
+""")
+            
+            # Set a flag to run the updater after exit
+            self.app.should_update = True
+            
+            def do_update():
+                self.app.exit()
+            
+            self.set_timer(0.5, do_update)
+            return  # Return immediately after scheduling
+        
         elif cmd == "/agent":
             # Override CLI's agent command with TUI-specific inline picker
             if self.chatbot and hasattr(self.chatbot, 'plugin_manager'):
@@ -3518,17 +3534,14 @@ You can manually edit your configuration file at:
             # Clean up
             if hasattr(self, '_command_input_state'):
                 self._command_input_state['waiting_for_input'] = False
-                self._command_input_state = None
+                delattr(self, '_command_input_state')
             
             # Restore originals
-            try:
-                rich.prompt.Prompt.ask = original_prompt_ask
-                rich.prompt.Confirm.ask = original_confirm_ask
-                Prompt.ask = original_prompt_ask
-                Confirm.ask = original_confirm_ask
-                rich.console.Console = original_console_class
-            except Exception as cleanup_error:
-                self.log(f"Error during add_agent cleanup: {cleanup_error}")
+            rich.prompt.Prompt.ask = original_prompt_ask
+            rich.prompt.Confirm.ask = original_confirm_ask
+            Prompt.ask = original_prompt_ask
+            Confirm.ask = original_confirm_ask
+            rich.console.Console = original_console_class
             
             try:
                 if not loop.is_closed():
@@ -3729,17 +3742,14 @@ You can manually edit your configuration file at:
             # Clean up
             if hasattr(self, '_command_input_state'):
                 self._command_input_state['waiting_for_input'] = False
-                self._command_input_state = None
+                delattr(self, '_command_input_state')
             
             # Restore originals
-            try:
-                rich.prompt.Prompt.ask = original_prompt_ask
-                rich.prompt.Confirm.ask = original_confirm_ask
-                Prompt.ask = original_prompt_ask
-                Confirm.ask = original_confirm_ask
-                rich.console.Console = original_console_class
-            except Exception as cleanup_error:
-                self.log(f"Error during add_tool cleanup: {cleanup_error}")
+            rich.prompt.Prompt.ask = original_prompt_ask
+            rich.prompt.Confirm.ask = original_confirm_ask
+            Prompt.ask = original_prompt_ask
+            Confirm.ask = original_confirm_ask
+            rich.console.Console = original_console_class
             
             try:
                 if not loop.is_closed():
@@ -4190,18 +4200,14 @@ You can manually edit your configuration file at:
             # Clean up
             if hasattr(self, '_command_input_state'):
                 self._command_input_state['waiting_for_input'] = False
-                self._command_input_state = None
+                delattr(self, '_command_input_state')
             
             # Restore originals
-            try:
-                rich.prompt.Prompt.ask = original_prompt_ask
-                rich.prompt.Confirm.ask = original_confirm_ask
-                Prompt.ask = original_prompt_ask
-                Confirm.ask = original_confirm_ask
-                rich.console.Console = original_console_class
-            except Exception as cleanup_error:
-                # Log any errors during cleanup but don't crash
-                self.log(f"Error during update cleanup: {cleanup_error}")
+            rich.prompt.Prompt.ask = original_prompt_ask
+            rich.prompt.Confirm.ask = original_confirm_ask
+            Prompt.ask = original_prompt_ask
+            Confirm.ask = original_confirm_ask
+            rich.console.Console = original_console_class
     
     def _run_agent_workflow_in_thread(self, agent_name: str, agent_desc: str, agent_init_args: dict = None):
         """Run an agent workflow in a separate thread to avoid asyncio conflicts."""
@@ -5440,6 +5446,7 @@ class ValbotTUI(App):
         self.config_manager = ConfigManager(config_path)
         utilities.set_config_manager(self.config_manager)
         self.should_restart = False  # Flag to trigger restart
+        self.should_update = False  # Flag to trigger updater
         # Register and use the custom valbot-dark theme
         self.register_theme(VALBOT_DARK_THEME)
         
@@ -5500,6 +5507,12 @@ def main():
             if app.should_restart:
                 print("\n🔄 Restarting TUI...\n")
                 continue
+            elif app.should_update:
+                print("\n🔄 Running updater in CLI mode...\n")
+                # Run the CLI app.py with update command
+                import subprocess
+                subprocess.call([sys.executable, "app.py"])
+                break
             else:
                 break
         except KeyboardInterrupt:

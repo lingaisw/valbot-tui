@@ -32,7 +32,33 @@ class ValbotUpdater:
     def perform_update(self, app_directory, is_frozen):
         subprocess.check_output(["git", "fetch", "--tags", "--force"], cwd=app_directory, stderr=subprocess.STDOUT)
         local_version =  self.get_version().split('-', 1)[0] #strip off the -<extra sha>
-        remote_version = subprocess.check_output(["git", "describe", "--tags", "--abbrev=0", "origin/HEAD"], cwd=app_directory).strip().decode('utf-8')
+        
+        # Try to get remote version from tags first, fall back to commit comparison
+        try:
+            remote_version = subprocess.check_output(["git", "describe", "--tags", "--abbrev=0", "origin/HEAD"], cwd=app_directory, stderr=subprocess.STDOUT).strip().decode('utf-8')
+            use_tags = True
+        except subprocess.CalledProcessError:
+            # No tags available, use commit-based comparison
+            self.console.print("[yellow]No version tags found, comparing commits instead...[/yellow]")
+            local_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=app_directory).strip().decode('utf-8')
+            remote_commit = subprocess.check_output(["git", "rev-parse", "origin/HEAD"], cwd=app_directory).strip().decode('utf-8')
+            
+            if local_commit == remote_commit:
+                self.console.print(f"[bold green]ValBot is up to date (commit: {local_commit[:7]}).[/bold green]")
+                return
+            
+            self.console.print(f"[bold yellow]Updates available![/bold yellow]")
+            self.console.print(f"Current commit: {local_commit[:7]} → Latest commit: {remote_commit[:7]}")
+            
+            # Check if requirements changed between commits
+            requirements_changed = self.check_requirements_changed_by_commit(app_directory, local_commit, remote_commit)
+            if requirements_changed:
+                self.console.print("[bold yellow]Dependencies have changed - you'll need to update python package requirements after updating.[/bold yellow]")
+            if not Confirm.ask("Update now?", default=True): return
+            self.apply_update_by_commit(app_directory, remote_commit, requirements_changed, is_frozen)
+            return
+        
+        # Tag-based update path
         if local_version == remote_version:
             self.console.print(f"[bold green]ValBot is up to date ({local_version}).[/bold green]")
             return
@@ -55,6 +81,42 @@ class ValbotUpdater:
              self.display_exe_rebuild_instructions(app_directory)
         else:
             self.reload_callback()
+
+    def apply_update_by_commit(self, app_directory, remote_commit, requirements_changed, is_frozen):
+        """Apply update using commit hash instead of tag."""
+        self.console.print("[yellow]Updating...[/yellow]")
+        # First, ensure we're on a branch that can be updated
+        try:
+            current_branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=app_directory).strip().decode('utf-8')
+            if current_branch == "HEAD":
+                # Detached HEAD state, checkout main/master first
+                self.console.print("[yellow]Detached HEAD detected, checking out main branch...[/yellow]")
+                subprocess.check_output(["git", "checkout", "main"], cwd=app_directory, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError:
+            try:
+                subprocess.check_output(["git", "checkout", "master"], cwd=app_directory, stderr=subprocess.STDOUT)
+            except subprocess.CalledProcessError:
+                pass
+        
+        # Pull the latest changes
+        if subprocess.call(["git", "pull"], cwd=app_directory) != 0:
+            self.console.print("[bold red]Update failed.[/bold red]")
+            return
+        self.console.print("[bold green]ValBot repository updated successfully![/bold green]")
+        if requirements_changed:  self.display_requirements_reinstall_instructions(app_directory, is_frozen)
+        if is_frozen:
+             self.display_exe_rebuild_instructions(app_directory)
+        else:
+            self.reload_callback()
+
+    def check_requirements_changed_by_commit(self, app_directory, local_commit, remote_commit):
+        """Check if requirements.txt changed between two commits."""
+        try:
+            current_requirements = subprocess.check_output(["git", "show", f"{local_commit}:requirements.txt"], cwd=app_directory, stderr=subprocess.DEVNULL).decode('utf-8')
+            new_requirements = subprocess.check_output(["git", "show", f"{remote_commit}:requirements.txt"], cwd=app_directory, stderr=subprocess.DEVNULL).decode('utf-8')
+            return current_requirements != new_requirements
+        except subprocess.CalledProcessError:
+            return False
 
     def find_git_repo_for_exe(self):
         """Find the git repository when running from a PyInstaller exe."""
@@ -131,10 +193,12 @@ class ValbotUpdater:
         app_dir = os.path.dirname(os.path.abspath(__file__))
         version = "unknown"
         try:
-            version = subprocess.check_output(["git", "describe", "--tags"], cwd=app_dir).strip().decode('utf-8')
+            # Try git describe with tags first
+            version = subprocess.check_output(["git", "describe", "--tags"], cwd=app_dir, stderr=subprocess.DEVNULL).strip().decode('utf-8')
         except (subprocess.CalledProcessError, FileNotFoundError):
             try:
-                version = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=app_dir).strip().decode('utf-8')
+                # Fall back to short commit hash if no tags
+                version = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=app_dir, stderr=subprocess.DEVNULL).strip().decode('utf-8')
             except (subprocess.CalledProcessError, FileNotFoundError):
                 pass
         return {"version": version, "repo_path": app_dir}

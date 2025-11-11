@@ -31,7 +31,7 @@ This TUI implementation includes all major features from the CLI version:
    - /commands - Show all available commands (via CommandManager)
    - /settings - Settings information
    - /reload - Reinitialize chatbot
-   - /update - Update information
+   - /update - Check for and install updates from GitHub
    - /add_agent - Add agent information
    - /add_tool - Add tool information
 
@@ -2207,7 +2207,7 @@ Please check your configuration and try again.
             ("/commands", "Show all available commands"),
             ("/settings", "Show settings information"),
             ("/reload", "Reinitialize chatbot"),
-            ("/update", "Update information"),
+            ("/update", "Check for and install updates from GitHub"),
             ("/add_agent", "Add agent information"),
             ("/add_tool", "Add tool information"),
         ]
@@ -3002,7 +3002,11 @@ Error executing command `{cmd}`:
 ### Configuration & Updates
 - `/settings` - View settings information
 - `/reload` - Reinitialize chatbot with current configuration
-- `/update` - Check for updates (see instructions)
+- `/update` - Check for and install updates from GitHub
+  - Automatically fetches latest changes
+  - Shows commit log of updates
+  - Handles git pull and requirements updates
+  - Prompts before applying changes
 
 ## {EMOJI['keyboard']} Keyboard Shortcuts
 
@@ -3311,18 +3315,12 @@ You can manually edit your configuration file at:
 """)
         
         elif cmd == "/update":
-            chat_panel.add_message("system", """## 📦 Check for Updates
-
-The update feature is not yet fully integrated in TUI mode.
-
-To update ValBot:
-1. Exit the TUI (Ctrl+Q)
-2. Run: `git pull` in the ValBot directory
-3. Run: `pip install -r requirements.txt`
-4. Restart ValBot TUI
-
-Or use the CLI version with: `python app.py` and run `/update`
-""")
+            # Run update in background thread
+            thread = threading.Thread(
+                target=self._run_update_in_thread,
+                daemon=True
+            )
+            thread.start()
                 
         else:
             chat_panel.add_message("error", f"{EMOJI['cross']} Unknown command: `{cmd}`\n\nType `/help` for available commands.")
@@ -3742,6 +3740,458 @@ Or use the CLI version with: `python app.py` and run `/update`
                     loop.close()
             except Exception:
                 pass
+    
+    def _run_update_in_thread(self):
+        """Run /update in a separate thread to pull latest changes from GitHub."""
+        import subprocess
+        import os
+        import threading
+        import rich
+        import rich.prompt
+        import rich.console
+        from rich.prompt import Prompt, Confirm
+        from rich.console import Console
+        import re
+        
+        chat_panel = self.query_one("#chat-panel", ChatPanel)
+        console_wrapper = self.chatbot.command_manager.console
+        
+        # Save original classes/functions
+        original_prompt_ask = Prompt.ask
+        original_confirm_ask = Confirm.ask
+        original_console_class = rich.console.Console
+        
+        # Create shared state for input handling
+        command_input_state = {
+            'waiting_for_input': False,
+            'prompt_text': None,
+            'result': None,
+            'ready': threading.Event()
+        }
+        
+        self._command_input_state = command_input_state
+        
+        # Monkey-patch Prompt.ask
+        def tui_prompt_ask(prompt="", **kwargs):
+            """Replacement for Prompt.ask that uses chat-based input."""
+            clean_prompt = re.sub(r'\[/?[^\]]+\]', '', str(prompt))
+            
+            choices = kwargs.get('choices', None)
+            default = kwargs.get('default', None)
+            
+            if choices:
+                choices_text = ", ".join(f"`{c}`" for c in choices)
+                full_prompt = f"**{clean_prompt}**\n\nChoices: {choices_text}"
+                if default:
+                    full_prompt += f"\n\n_Default: `{default}`_"
+            else:
+                full_prompt = f"**{clean_prompt}**"
+                if default:
+                    full_prompt += f"\n\n_Default: `{default}`_"
+            
+            self.app.call_from_thread(
+                chat_panel.add_message,
+                "assistant",
+                full_prompt
+            )
+            
+            command_input_state['waiting_for_input'] = True
+            command_input_state['prompt_text'] = clean_prompt
+            command_input_state['result'] = None
+            command_input_state['ready'].clear()
+            
+            command_input_state['ready'].wait()
+            
+            result = command_input_state['result']
+            command_input_state['waiting_for_input'] = False
+            
+            if not result and default:
+                return default
+            return result if result else ""
+        
+        # Monkey-patch Confirm.ask
+        def tui_confirm_ask(prompt="", **kwargs):
+            """Replacement for Confirm.ask that uses chat-based input."""
+            clean_prompt = re.sub(r'\[/?[^\]]+\]', '', str(prompt))
+            default = kwargs.get('default', True)
+            
+            full_prompt = f"**{clean_prompt}**\n\nChoices: `y`, `n`"
+            if default is not None:
+                full_prompt += f"\n\n_Default: `{'y' if default else 'n'}`_"
+            
+            self.app.call_from_thread(
+                chat_panel.add_message,
+                "assistant",
+                full_prompt
+            )
+            
+            command_input_state['waiting_for_input'] = True
+            command_input_state['prompt_text'] = clean_prompt
+            command_input_state['result'] = None
+            command_input_state['ready'].clear()
+            
+            command_input_state['ready'].wait()
+            
+            result = command_input_state['result']
+            command_input_state['waiting_for_input'] = False
+            
+            if not result and default is not None:
+                return default
+            
+            return result.lower() in ['y', 'yes', 'true', '1']
+        
+        # Create TUI Console wrapper
+        _captured_console_wrapper = console_wrapper
+        
+        class TUIConsole:
+            """Console replacement for TUI mode."""
+            def __init__(self, *args, **kwargs):
+                self._wrapper = _captured_console_wrapper
+            
+            def print(self, *args, **kwargs):
+                return self._wrapper.print(*args, **kwargs)
+            
+            def rule(self, *args, **kwargs):
+                return self._wrapper.rule(*args, **kwargs)
+            
+            def status(self, *args, **kwargs):
+                return self._wrapper.status(*args, **kwargs)
+            
+            def input(self, prompt="", **kwargs):
+                return self._wrapper.input(prompt, **kwargs)
+            
+            def log(self, *args, **kwargs):
+                return self._wrapper.print(*args, **kwargs)
+            
+            @property
+            def width(self):
+                return 80
+            
+            @property
+            def height(self):
+                return 24
+            
+            def is_terminal(self):
+                return self._wrapper.is_terminal()
+        
+        # Apply monkey patches
+        rich.prompt.Prompt.ask = classmethod(lambda cls, *args, **kwargs: tui_prompt_ask(*args, **kwargs))
+        rich.prompt.Confirm.ask = classmethod(lambda cls, *args, **kwargs: tui_confirm_ask(*args, **kwargs))
+        Prompt.ask = classmethod(lambda cls, *args, **kwargs: tui_prompt_ask(*args, **kwargs))
+        Confirm.ask = classmethod(lambda cls, *args, **kwargs: tui_confirm_ask(*args, **kwargs))
+        rich.console.Console = TUIConsole
+        
+        # Add starting message
+        self.app.call_from_thread(
+            chat_panel.add_message,
+            "system",
+            f"{EMOJI['gear']} Checking for updates..."
+        )
+        
+        try:
+            # Get the repository directory
+            app_directory = os.path.dirname(os.path.abspath(__file__))
+            expected_repo_url = "https://github.com/lingaisw/valbot-tui.git"
+            
+            # Check if we're in a git repository
+            try:
+                subprocess.check_output(
+                    ["git", "rev-parse", "--git-dir"],
+                    cwd=app_directory,
+                    stderr=subprocess.STDOUT
+                )
+            except subprocess.CalledProcessError:
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "error",
+                    f"{EMOJI['cross']} Not a git repository. Cannot update.\n\n"
+                    f"To set up git tracking:\n"
+                    f"```bash\n"
+                    f"cd {app_directory}\n"
+                    f"git init\n"
+                    f"git remote add origin {expected_repo_url}\n"
+                    f"git fetch\n"
+                    f"git checkout main\n"
+                    f"```"
+                )
+                return
+            
+            # Check if 'origin' remote exists and verify URL
+            try:
+                current_remote = subprocess.check_output(
+                    ["git", "remote", "get-url", "origin"],
+                    cwd=app_directory,
+                    stderr=subprocess.STDOUT
+                ).strip().decode('utf-8')
+                
+                # Normalize URLs for comparison (handle .git suffix and https/git protocols)
+                def normalize_url(url):
+                    url = url.lower().rstrip('/')
+                    if url.endswith('.git'):
+                        url = url[:-4]
+                    return url
+                
+                if normalize_url(current_remote) != normalize_url(expected_repo_url):
+                    self.app.call_from_thread(
+                        chat_panel.add_message,
+                        "assistant",
+                        f"{EMOJI['info']} **Remote URL Mismatch**\n\n"
+                        f"Current remote: `{current_remote}`\n"
+                        f"Expected remote: `{expected_repo_url}`\n\n"
+                        f"Would you like to update the remote URL to the correct repository?"
+                    )
+                    
+                    if tui_confirm_ask("Update remote URL?", default=True):
+                        try:
+                            subprocess.check_output(
+                                ["git", "remote", "set-url", "origin", expected_repo_url],
+                                cwd=app_directory,
+                                stderr=subprocess.STDOUT
+                            )
+                            self.app.call_from_thread(
+                                chat_panel.add_message,
+                                "system",
+                                f"{EMOJI['checkmark']} Remote URL updated to: `{expected_repo_url}`"
+                            )
+                        except subprocess.CalledProcessError as e:
+                            error_msg = e.output.decode('utf-8') if e.output else str(e)
+                            self.app.call_from_thread(
+                                chat_panel.add_message,
+                                "error",
+                                f"{EMOJI['cross']} Failed to update remote URL:\n\n```\n{error_msg}\n```"
+                            )
+                            return
+                    else:
+                        self.app.call_from_thread(
+                            chat_panel.add_message,
+                            "system",
+                            f"{EMOJI['info']} Update cancelled. Using current remote: `{current_remote}`"
+                        )
+                        
+            except subprocess.CalledProcessError:
+                # No origin remote configured
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "assistant",
+                    f"{EMOJI['info']} No 'origin' remote configured.\n\n"
+                    f"Would you like to add the ValBot TUI repository as origin?"
+                )
+                
+                if tui_confirm_ask("Add origin remote?", default=True):
+                    try:
+                        subprocess.check_output(
+                            ["git", "remote", "add", "origin", expected_repo_url],
+                            cwd=app_directory,
+                            stderr=subprocess.STDOUT
+                        )
+                        self.app.call_from_thread(
+                            chat_panel.add_message,
+                            "system",
+                            f"{EMOJI['checkmark']} Added origin remote: `{expected_repo_url}`"
+                        )
+                    except subprocess.CalledProcessError as e:
+                        error_msg = e.output.decode('utf-8') if e.output else str(e)
+                        self.app.call_from_thread(
+                            chat_panel.add_message,
+                            "error",
+                            f"{EMOJI['cross']} Failed to add remote:\n\n```\n{error_msg}\n```"
+                        )
+                        return
+                else:
+                    self.app.call_from_thread(
+                        chat_panel.add_message,
+                        "error",
+                        f"{EMOJI['cross']} Cannot update without a remote repository configured."
+                    )
+                    return
+            
+            # Fetch latest changes
+            self.app.call_from_thread(
+                chat_panel.add_message,
+                "system",
+                f"{EMOJI['info']} Fetching updates from GitHub..."
+            )
+            
+            try:
+                subprocess.check_output(
+                    ["git", "fetch", "origin"],
+                    cwd=app_directory,
+                    stderr=subprocess.STDOUT
+                )
+            except subprocess.CalledProcessError as e:
+                error_msg = e.output.decode('utf-8') if e.output else str(e)
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "error",
+                    f"{EMOJI['cross']} Failed to fetch updates:\n\n```\n{error_msg}\n```"
+                )
+                return
+            
+            # Get current branch
+            try:
+                current_branch = subprocess.check_output(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    cwd=app_directory
+                ).strip().decode('utf-8')
+            except subprocess.CalledProcessError:
+                current_branch = "main"
+            
+            # Check if there are updates available
+            try:
+                local_commit = subprocess.check_output(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=app_directory
+                ).strip().decode('utf-8')
+                
+                remote_commit = subprocess.check_output(
+                    ["git", "rev-parse", f"origin/{current_branch}"],
+                    cwd=app_directory
+                ).strip().decode('utf-8')
+                
+                if local_commit == remote_commit:
+                    self.app.call_from_thread(
+                        chat_panel.add_message,
+                        "system",
+                        f"{EMOJI['checkmark']} ValBot is already up to date!\n\n"
+                        f"Current version: `{local_commit[:7]}`"
+                    )
+                    return
+                
+                # Get commit log
+                try:
+                    commit_log = subprocess.check_output(
+                        ["git", "log", f"{local_commit}..{remote_commit}", "--oneline", "--max-count=10"],
+                        cwd=app_directory
+                    ).decode('utf-8').strip()
+                except subprocess.CalledProcessError:
+                    commit_log = "Unable to retrieve commit log"
+                
+                # Show available updates
+                update_msg = f"{EMOJI['info']} **Updates Available**\n\n"
+                update_msg += f"Current: `{local_commit[:7]}`\n"
+                update_msg += f"Latest: `{remote_commit[:7]}`\n\n"
+                if commit_log:
+                    update_msg += f"**Recent Changes:**\n```\n{commit_log}\n```\n\n"
+                
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "system",
+                    update_msg
+                )
+                
+                # Check for uncommitted changes
+                try:
+                    status_output = subprocess.check_output(
+                        ["git", "status", "--porcelain"],
+                        cwd=app_directory
+                    ).decode('utf-8').strip()
+                    
+                    if status_output:
+                        self.app.call_from_thread(
+                            chat_panel.add_message,
+                            "assistant",
+                            f"{EMOJI['info']} **Warning:** You have uncommitted changes in your repository.\n\n"
+                            f"```\n{status_output}\n```\n\n"
+                            f"These changes may be overwritten or cause conflicts."
+                        )
+                except subprocess.CalledProcessError:
+                    pass
+                
+                # Ask for confirmation using monkey-patched Confirm
+                if not tui_confirm_ask("Update now?", default=True):
+                    self.app.call_from_thread(
+                        chat_panel.add_message,
+                        "system",
+                        f"{EMOJI['info']} Update cancelled."
+                    )
+                    return
+                
+                # Perform the update
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "system",
+                    f"{EMOJI['gear']} Pulling latest changes..."
+                )
+                
+                try:
+                    pull_output = subprocess.check_output(
+                        ["git", "pull", "origin", current_branch],
+                        cwd=app_directory,
+                        stderr=subprocess.STDOUT
+                    ).decode('utf-8')
+                    
+                    self.app.call_from_thread(
+                        chat_panel.add_message,
+                        "system",
+                        f"{EMOJI['checkmark']} **Update Successful!**\n\n"
+                        f"```\n{pull_output}\n```\n\n"
+                        f"**Next Steps:**\n"
+                        f"1. Check if `requirements.txt` was updated\n"
+                        f"2. If yes, run: `pip install -r requirements.txt`\n"
+                        f"3. Restart ValBot TUI to apply changes\n\n"
+                        f"Press `Ctrl+Q` to exit and restart."
+                    )
+                    
+                    # Check if requirements.txt changed
+                    try:
+                        changed_files = subprocess.check_output(
+                            ["git", "diff", "--name-only", f"{local_commit}..HEAD"],
+                            cwd=app_directory
+                        ).decode('utf-8')
+                        
+                        if "requirements.txt" in changed_files:
+                            self.app.call_from_thread(
+                                chat_panel.add_message,
+                                "assistant",
+                                f"{EMOJI['info']} **Important:** `requirements.txt` was updated!\n\n"
+                                f"Please run the following command before restarting:\n\n"
+                                f"```bash\n"
+                                f"pip install -r requirements.txt\n"
+                                f"```"
+                            )
+                    except subprocess.CalledProcessError:
+                        pass
+                    
+                except subprocess.CalledProcessError as e:
+                    error_msg = e.output.decode('utf-8') if e.output else str(e)
+                    self.app.call_from_thread(
+                        chat_panel.add_message,
+                        "error",
+                        f"{EMOJI['cross']} **Update Failed**\n\n```\n{error_msg}\n```\n\n"
+                        f"You may need to resolve conflicts manually or reset your repository."
+                    )
+                    return
+                
+            except subprocess.CalledProcessError as e:
+                error_msg = e.output.decode('utf-8') if e.output else str(e)
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "error",
+                    f"{EMOJI['cross']} Error checking for updates:\n\n```\n{error_msg}\n```"
+                )
+                return
+            
+        except Exception as e:
+            import traceback
+            error_details = f"{EMOJI['cross']} Unexpected error during update:\n\n```\n{str(e)}\n\n{traceback.format_exc()}\n```"
+            self.app.call_from_thread(
+                chat_panel.add_message,
+                "error",
+                error_details
+            )
+        
+        finally:
+            # Clean up
+            if hasattr(self, '_command_input_state'):
+                self._command_input_state['waiting_for_input'] = False
+                delattr(self, '_command_input_state')
+            
+            # Restore originals
+            rich.prompt.Prompt.ask = original_prompt_ask
+            rich.prompt.Confirm.ask = original_confirm_ask
+            Prompt.ask = original_prompt_ask
+            Confirm.ask = original_confirm_ask
+            rich.console.Console = original_console_class
     
     def _run_agent_workflow_in_thread(self, agent_name: str, agent_desc: str, agent_init_args: dict = None):
         """Run an agent workflow in a separate thread to avoid asyncio conflicts."""

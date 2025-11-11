@@ -3518,14 +3518,17 @@ You can manually edit your configuration file at:
             # Clean up
             if hasattr(self, '_command_input_state'):
                 self._command_input_state['waiting_for_input'] = False
-                delattr(self, '_command_input_state')
+                self._command_input_state = None
             
             # Restore originals
-            rich.prompt.Prompt.ask = original_prompt_ask
-            rich.prompt.Confirm.ask = original_confirm_ask
-            Prompt.ask = original_prompt_ask
-            Confirm.ask = original_confirm_ask
-            rich.console.Console = original_console_class
+            try:
+                rich.prompt.Prompt.ask = original_prompt_ask
+                rich.prompt.Confirm.ask = original_confirm_ask
+                Prompt.ask = original_prompt_ask
+                Confirm.ask = original_confirm_ask
+                rich.console.Console = original_console_class
+            except Exception as cleanup_error:
+                self.log(f"Error during add_agent cleanup: {cleanup_error}")
             
             try:
                 if not loop.is_closed():
@@ -3726,14 +3729,17 @@ You can manually edit your configuration file at:
             # Clean up
             if hasattr(self, '_command_input_state'):
                 self._command_input_state['waiting_for_input'] = False
-                delattr(self, '_command_input_state')
+                self._command_input_state = None
             
             # Restore originals
-            rich.prompt.Prompt.ask = original_prompt_ask
-            rich.prompt.Confirm.ask = original_confirm_ask
-            Prompt.ask = original_prompt_ask
-            Confirm.ask = original_confirm_ask
-            rich.console.Console = original_console_class
+            try:
+                rich.prompt.Prompt.ask = original_prompt_ask
+                rich.prompt.Confirm.ask = original_confirm_ask
+                Prompt.ask = original_prompt_ask
+                Confirm.ask = original_confirm_ask
+                rich.console.Console = original_console_class
+            except Exception as cleanup_error:
+                self.log(f"Error during add_tool cleanup: {cleanup_error}")
             
             try:
                 if not loop.is_closed():
@@ -4184,14 +4190,18 @@ You can manually edit your configuration file at:
             # Clean up
             if hasattr(self, '_command_input_state'):
                 self._command_input_state['waiting_for_input'] = False
-                delattr(self, '_command_input_state')
+                self._command_input_state = None
             
             # Restore originals
-            rich.prompt.Prompt.ask = original_prompt_ask
-            rich.prompt.Confirm.ask = original_confirm_ask
-            Prompt.ask = original_prompt_ask
-            Confirm.ask = original_confirm_ask
-            rich.console.Console = original_console_class
+            try:
+                rich.prompt.Prompt.ask = original_prompt_ask
+                rich.prompt.Confirm.ask = original_confirm_ask
+                Prompt.ask = original_prompt_ask
+                Confirm.ask = original_confirm_ask
+                rich.console.Console = original_console_class
+            except Exception as cleanup_error:
+                # Log any errors during cleanup but don't crash
+                self.log(f"Error during update cleanup: {cleanup_error}")
     
     def _run_agent_workflow_in_thread(self, agent_name: str, agent_desc: str, agent_init_args: dict = None):
         """Run an agent workflow in a separate thread to avoid asyncio conflicts."""

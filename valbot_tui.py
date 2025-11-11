@@ -125,6 +125,7 @@ from terminal_manager import TerminalManager
 from bot_commands import CommandManager
 from rich.console import Console
 from console_extensions import HistoryConsole
+from valbot_updater import ValbotUpdater
 import sys
 import os
 import tempfile
@@ -2832,20 +2833,18 @@ Restarting TUI to reload configuration...
             return  # Return immediately after scheduling
         
         elif cmd == "/update":
-            # Handle /update by closing TUI and running CLI updater
-            chat_panel.add_message("system", """## 🔄 Update ValBot
-
-Closing TUI to run updater in CLI mode...
-""")
+            # Run update in TU/upI using ValbotUpdater in a background thread
+            import threading
             
-            # Set a flag to run the updater after exit
-            self.app.should_update = True
+            chat_panel.add_message("system", f"{EMOJI['gear']} Checking for updates...")
             
-            def do_update():
-                self.app.exit()
-            
-            self.set_timer(0.5, do_update)
-            return  # Return immediately after scheduling
+            # Run update in background thread
+            thread = threading.Thread(
+                target=self._run_update_in_thread,
+                daemon=True
+            )
+            thread.start()
+            return
         
         elif cmd == "/agent":
             # Override CLI's agent command with TUI-specific inline picker
@@ -3329,14 +3328,6 @@ You can manually edit your configuration file at:
 - `general.ascii_banner_size` - Banner size
 - `general.display_commands_on_startup` - Show commands on start
 """)
-        
-        elif cmd == "/update":
-            # Run update in background thread
-            thread = threading.Thread(
-                target=self._run_update_in_thread,
-                daemon=True
-            )
-            thread.start()
                 
         else:
             chat_panel.add_message("error", f"{EMOJI['cross']} Unknown command: `{cmd}`\n\nType `/help` for available commands.")
@@ -3758,15 +3749,12 @@ You can manually edit your configuration file at:
                 pass
     
     def _run_update_in_thread(self):
-        """Run /update in a separate thread to pull latest changes from GitHub."""
-        import subprocess
-        import os
+        """Run /update using ValbotUpdater - non-blocking and TUI-friendly."""
         import threading
         import rich
         import rich.prompt
         import rich.console
         from rich.prompt import Prompt, Confirm
-        from rich.console import Console
         import re
         
         chat_panel = self.query_one("#chat-panel", ChatPanel)
@@ -3897,295 +3885,38 @@ You can manually edit your configuration file at:
         Confirm.ask = classmethod(lambda cls, *args, **kwargs: tui_confirm_ask(*args, **kwargs))
         rich.console.Console = TUIConsole
         
-        # Add starting message
-        self.app.call_from_thread(
-            chat_panel.add_message,
-            "system",
-            f"{EMOJI['gear']} Checking for updates..."
-        )
-        
         try:
-            # Get the repository directory
-            app_directory = os.path.dirname(os.path.abspath(__file__))
-            expected_repo_url = "https://github.com/lingaisw/valbot-tui.git"
+            # Create TUI console wrapper
+            tui_console = TUIConsole()
             
-            # Check if we're in a git repository
-            try:
-                subprocess.check_output(
-                    ["git", "rev-parse", "--git-dir"],
-                    cwd=app_directory,
-                    stderr=subprocess.STDOUT
-                )
-            except subprocess.CalledProcessError:
+            # Define callbacks for reload and exit
+            def reload_callback():
+                """Called when update completes and reload is needed."""
                 self.app.call_from_thread(
                     chat_panel.add_message,
-                    "error",
-                    f"{EMOJI['cross']} Not a git repository. Cannot update.\n\n"
-                    f"To set up git tracking:\n"
-                    f"```bash\n"
-                    f"cd {app_directory}\n"
-                    f"git init\n"
-                    f"git remote add origin {expected_repo_url}\n"
-                    f"git fetch\n"
-                    f"git checkout main\n"
-                    f"```"
+                    "system",
+                    f"{EMOJI['checkmark']} **Update complete!**\n\n"
+                    f"Please type `/reload` or manually restart the TUI to apply changes."
                 )
-                return
             
-            # Check if 'origin' remote exists and verify URL
-            try:
-                current_remote = subprocess.check_output(
-                    ["git", "remote", "get-url", "origin"],
-                    cwd=app_directory,
-                    stderr=subprocess.STDOUT
-                ).strip().decode('utf-8')
-                
-                # Normalize URLs for comparison (handle .git suffix and https/git protocols)
-                def normalize_url(url):
-                    url = url.lower().rstrip('/')
-                    if url.endswith('.git'):
-                        url = url[:-4]
-                    return url
-                
-                if normalize_url(current_remote) != normalize_url(expected_repo_url):
-                    self.app.call_from_thread(
-                        chat_panel.add_message,
-                        "assistant",
-                        f"{EMOJI['info']} **Remote URL Mismatch**\n\n"
-                        f"Current remote: `{current_remote}`\n"
-                        f"Expected remote: `{expected_repo_url}`\n\n"
-                        f"Would you like to update the remote URL to the correct repository?"
-                    )
-                    
-                    if tui_confirm_ask("Update remote URL?", default=True):
-                        try:
-                            subprocess.check_output(
-                                ["git", "remote", "set-url", "origin", expected_repo_url],
-                                cwd=app_directory,
-                                stderr=subprocess.STDOUT
-                            )
-                            self.app.call_from_thread(
-                                chat_panel.add_message,
-                                "system",
-                                f"{EMOJI['checkmark']} Remote URL updated to: `{expected_repo_url}`"
-                            )
-                        except subprocess.CalledProcessError as e:
-                            error_msg = e.output.decode('utf-8') if e.output else str(e)
-                            self.app.call_from_thread(
-                                chat_panel.add_message,
-                                "error",
-                                f"{EMOJI['cross']} Failed to update remote URL:\n\n```\n{error_msg}\n```"
-                            )
-                            return
-                    else:
-                        self.app.call_from_thread(
-                            chat_panel.add_message,
-                            "system",
-                            f"{EMOJI['info']} Update cancelled. Using current remote: `{current_remote}`"
-                        )
-                        
-            except subprocess.CalledProcessError:
-                # No origin remote configured
+            def exit_callback():
+                """Called when running from exe and rebuild is needed."""
                 self.app.call_from_thread(
                     chat_panel.add_message,
-                    "assistant",
-                    f"{EMOJI['info']} No 'origin' remote configured.\n\n"
-                    f"Would you like to add the ValBot TUI repository as origin?"
+                    "system",
+                    f"{EMOJI['info']} Update complete. Please rebuild the executable as instructed.\n\n"
+                    f"Press `Ctrl+Q` to exit."
                 )
-                
-                if tui_confirm_ask("Add origin remote?", default=True):
-                    try:
-                        subprocess.check_output(
-                            ["git", "remote", "add", "origin", expected_repo_url],
-                            cwd=app_directory,
-                            stderr=subprocess.STDOUT
-                        )
-                        self.app.call_from_thread(
-                            chat_panel.add_message,
-                            "system",
-                            f"{EMOJI['checkmark']} Added origin remote: `{expected_repo_url}`"
-                        )
-                    except subprocess.CalledProcessError as e:
-                        error_msg = e.output.decode('utf-8') if e.output else str(e)
-                        self.app.call_from_thread(
-                            chat_panel.add_message,
-                            "error",
-                            f"{EMOJI['cross']} Failed to add remote:\n\n```\n{error_msg}\n```"
-                        )
-                        return
-                else:
-                    self.app.call_from_thread(
-                        chat_panel.add_message,
-                        "error",
-                        f"{EMOJI['cross']} Cannot update without a remote repository configured."
-                    )
-                    return
             
-            # Fetch latest changes
-            self.app.call_from_thread(
-                chat_panel.add_message,
-                "system",
-                f"{EMOJI['info']} Fetching updates from GitHub..."
+            # Create and run the updater
+            updater = ValbotUpdater(
+                console=tui_console,
+                reload_callback=reload_callback,
+                exit_callback=exit_callback
             )
             
-            try:
-                subprocess.check_output(
-                    ["git", "fetch", "origin"],
-                    cwd=app_directory,
-                    stderr=subprocess.STDOUT
-                )
-            except subprocess.CalledProcessError as e:
-                error_msg = e.output.decode('utf-8') if e.output else str(e)
-                self.app.call_from_thread(
-                    chat_panel.add_message,
-                    "error",
-                    f"{EMOJI['cross']} Failed to fetch updates:\n\n```\n{error_msg}\n```"
-                )
-                return
-            
-            # Get current branch
-            try:
-                current_branch = subprocess.check_output(
-                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                    cwd=app_directory
-                ).strip().decode('utf-8')
-            except subprocess.CalledProcessError:
-                current_branch = "main"
-            
-            # Check if there are updates available
-            try:
-                local_commit = subprocess.check_output(
-                    ["git", "rev-parse", "HEAD"],
-                    cwd=app_directory
-                ).strip().decode('utf-8')
-                
-                remote_commit = subprocess.check_output(
-                    ["git", "rev-parse", f"origin/{current_branch}"],
-                    cwd=app_directory
-                ).strip().decode('utf-8')
-                
-                if local_commit == remote_commit:
-                    self.app.call_from_thread(
-                        chat_panel.add_message,
-                        "system",
-                        f"{EMOJI['checkmark']} ValBot is already up to date!\n\n"
-                        f"Current version: `{local_commit[:7]}`"
-                    )
-                    return
-                
-                # Get commit log
-                try:
-                    commit_log = subprocess.check_output(
-                        ["git", "log", f"{local_commit}..{remote_commit}", "--oneline", "--max-count=10"],
-                        cwd=app_directory
-                    ).decode('utf-8').strip()
-                except subprocess.CalledProcessError:
-                    commit_log = "Unable to retrieve commit log"
-                
-                # Show available updates
-                update_msg = f"{EMOJI['info']} **Updates Available**\n\n"
-                update_msg += f"Current: `{local_commit[:7]}`\n"
-                update_msg += f"Latest: `{remote_commit[:7]}`\n\n"
-                if commit_log:
-                    update_msg += f"**Recent Changes:**\n```\n{commit_log}\n```\n\n"
-                
-                self.app.call_from_thread(
-                    chat_panel.add_message,
-                    "system",
-                    update_msg
-                )
-                
-                # Check for uncommitted changes
-                try:
-                    status_output = subprocess.check_output(
-                        ["git", "status", "--porcelain"],
-                        cwd=app_directory
-                    ).decode('utf-8').strip()
-                    
-                    if status_output:
-                        self.app.call_from_thread(
-                            chat_panel.add_message,
-                            "assistant",
-                            f"{EMOJI['info']} **Warning:** You have uncommitted changes in your repository.\n\n"
-                            f"```\n{status_output}\n```\n\n"
-                            f"These changes may be overwritten or cause conflicts."
-                        )
-                except subprocess.CalledProcessError:
-                    pass
-                
-                # Ask for confirmation using monkey-patched Confirm
-                if not tui_confirm_ask("Update now?", default=True):
-                    self.app.call_from_thread(
-                        chat_panel.add_message,
-                        "system",
-                        f"{EMOJI['info']} Update cancelled."
-                    )
-                    return
-                
-                # Perform the update
-                self.app.call_from_thread(
-                    chat_panel.add_message,
-                    "system",
-                    f"{EMOJI['gear']} Pulling latest changes..."
-                )
-                
-                try:
-                    pull_output = subprocess.check_output(
-                        ["git", "pull", "origin", current_branch],
-                        cwd=app_directory,
-                        stderr=subprocess.STDOUT
-                    ).decode('utf-8')
-                    
-                    self.app.call_from_thread(
-                        chat_panel.add_message,
-                        "system",
-                        f"{EMOJI['checkmark']} **Update Successful!**\n\n"
-                        f"```\n{pull_output}\n```\n\n"
-                        f"**Next Steps:**\n"
-                        f"1. Check if `requirements.txt` was updated\n"
-                        f"2. If yes, run: `pip install -r requirements.txt`\n"
-                        f"3. Restart ValBot TUI to apply changes\n\n"
-                        f"Press `Ctrl+Q` to exit and restart."
-                    )
-                    
-                    # Check if requirements.txt changed
-                    try:
-                        changed_files = subprocess.check_output(
-                            ["git", "diff", "--name-only", f"{local_commit}..HEAD"],
-                            cwd=app_directory
-                        ).decode('utf-8')
-                        
-                        if "requirements.txt" in changed_files:
-                            self.app.call_from_thread(
-                                chat_panel.add_message,
-                                "assistant",
-                                f"{EMOJI['info']} **Important:** `requirements.txt` was updated!\n\n"
-                                f"Please run the following command before restarting:\n\n"
-                                f"```bash\n"
-                                f"pip install -r requirements.txt\n"
-                                f"```"
-                            )
-                    except subprocess.CalledProcessError:
-                        pass
-                    
-                except subprocess.CalledProcessError as e:
-                    error_msg = e.output.decode('utf-8') if e.output else str(e)
-                    self.app.call_from_thread(
-                        chat_panel.add_message,
-                        "error",
-                        f"{EMOJI['cross']} **Update Failed**\n\n```\n{error_msg}\n```\n\n"
-                        f"You may need to resolve conflicts manually or reset your repository."
-                    )
-                    return
-                
-            except subprocess.CalledProcessError as e:
-                error_msg = e.output.decode('utf-8') if e.output else str(e)
-                self.app.call_from_thread(
-                    chat_panel.add_message,
-                    "error",
-                    f"{EMOJI['cross']} Error checking for updates:\n\n```\n{error_msg}\n```"
-                )
-                return
+            # Run the update
+            updater.update()
             
         except Exception as e:
             import traceback
@@ -4208,6 +3939,7 @@ You can manually edit your configuration file at:
             Prompt.ask = original_prompt_ask
             Confirm.ask = original_confirm_ask
             rich.console.Console = original_console_class
+
     
     def _run_agent_workflow_in_thread(self, agent_name: str, agent_desc: str, agent_init_args: dict = None):
         """Run an agent workflow in a separate thread to avoid asyncio conflicts."""

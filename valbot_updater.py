@@ -72,42 +72,163 @@ class ValbotUpdater:
 
     def apply_update(self, app_directory, remote_version, requirements_changed, is_frozen):
         self.console.print("[yellow]Updating...[/yellow]")
-        if subprocess.call(["git", "checkout", remote_version], cwd=app_directory) != 0:
-            self.console.print("[bold red]Update failed.[/bold red]")
+        try:
+            subprocess.check_output(["git", "checkout", remote_version], cwd=app_directory, stderr=subprocess.STDOUT)
+            self.console.print("[bold green]ValBot repository updated successfully![/bold green]")
+        except subprocess.CalledProcessError as e:
+            error_msg = e.output.decode('utf-8') if e.output else str(e)
+            self.console.print(f"[bold red]Update failed:[/bold red]\n{error_msg}")
             return
-        self.console.print("[bold green]ValBot repository updated successfully![/bold green]")
+        
+        # Fix file permissions on Linux
+        if sys.platform.startswith('linux'):
+            self.fix_linux_permissions(app_directory)
+        
         if requirements_changed:  self.display_requirements_reinstall_instructions(app_directory, is_frozen)
         if is_frozen:
              self.display_exe_rebuild_instructions(app_directory)
         else:
-            self.reload_callback()
+            if self.reload_callback:
+                self.reload_callback()
 
     def apply_update_by_commit(self, app_directory, remote_commit, requirements_changed, is_frozen):
         """Apply update using commit hash instead of tag."""
         self.console.print("[yellow]Updating...[/yellow]")
         # First, ensure we're on a branch that can be updated
+        current_branch = "main"  # Default
         try:
-            current_branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=app_directory).strip().decode('utf-8')
+            current_branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=app_directory, stderr=subprocess.DEVNULL).strip().decode('utf-8')
             if current_branch == "HEAD":
                 # Detached HEAD state, checkout main/master first
                 self.console.print("[yellow]Detached HEAD detected, checking out main branch...[/yellow]")
-                subprocess.check_output(["git", "checkout", "main"], cwd=app_directory, stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError:
-            try:
-                subprocess.check_output(["git", "checkout", "master"], cwd=app_directory, stderr=subprocess.STDOUT)
-            except subprocess.CalledProcessError:
-                pass
+                try:
+                    subprocess.check_output(["git", "checkout", "main"], cwd=app_directory, stderr=subprocess.STDOUT)
+                    current_branch = "main"
+                except subprocess.CalledProcessError:
+                    try:
+                        subprocess.check_output(["git", "checkout", "master"], cwd=app_directory, stderr=subprocess.STDOUT)
+                        current_branch = "master"
+                    except subprocess.CalledProcessError as e:
+                        error_msg = e.output.decode('utf-8') if e.output else str(e)
+                        self.console.print(f"[bold red]Failed to checkout branch:[/bold red] {error_msg}")
+                        return
+        except subprocess.CalledProcessError as e:
+            error_msg = e.output.decode('utf-8') if e.output else str(e)
+            self.console.print(f"[bold red]Failed to get current branch:[/bold red] {error_msg}")
+            # Try to continue with default branch
         
-        # Pull the latest changes
-        if subprocess.call(["git", "pull"], cwd=app_directory) != 0:
-            self.console.print("[bold red]Update failed.[/bold red]")
+        # Check for local changes before pulling
+        try:
+            status_output = subprocess.check_output(["git", "status", "--porcelain"], cwd=app_directory).decode('utf-8').strip()
+            if status_output:
+                # Parse modified files
+                modified_files = []
+                for line in status_output.split('\n'):
+                    if line.strip():
+                        # Get filename (last part after spaces)
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            modified_files.append(parts[-1])
+                
+                if modified_files:
+                    self.console.print("[bold yellow]⚠️  Local Changes Detected[/bold yellow]\n")
+                    self.console.print("The following files have been modified locally:\n")
+                    for f in modified_files:
+                        self.console.print(f"  • {f}")
+                    self.console.print("")
+                    
+                    # Ask user how to handle conflicts
+                    self.console.print("[yellow]Choose how to handle these changes:[/yellow]")
+                    self.console.print("1. [bold]Overwrite[/bold] - Discard local changes and use repository version")
+                    self.console.print("2. [bold]Keep[/bold] - Keep local changes and skip update")
+                    self.console.print("3. [bold]Cancel[/bold] - Cancel the update\n")
+                    
+                    choice = Prompt.ask("Your choice", choices=["1", "2", "3"], default="3")
+                    
+                    if choice == "1":
+                        # Stash changes and pull
+                        self.console.print("[yellow]Discarding local changes...[/yellow]")
+                        try:
+                            subprocess.check_output(["git", "reset", "--hard", "HEAD"], cwd=app_directory, stderr=subprocess.STDOUT)
+                            self.console.print("[green]Local changes discarded.[/green]")
+                        except subprocess.CalledProcessError as e:
+                            error_msg = e.output.decode('utf-8') if e.output else str(e)
+                            self.console.print(f"[bold red]Failed to discard changes:[/bold red] {error_msg}")
+                            return
+                    
+                    elif choice == "2":
+                        # Stash and try to reapply
+                        self.console.print("[yellow]Saving local changes...[/yellow]")
+                        try:
+                            subprocess.check_output(["git", "stash"], cwd=app_directory, stderr=subprocess.STDOUT)
+                            self.console.print("[green]Local changes saved.[/green]")
+                            
+                            # Note: We'll try to pop stash after pull
+                            stashed = True
+                        except subprocess.CalledProcessError as e:
+                            error_msg = e.output.decode('utf-8') if e.output else str(e)
+                            self.console.print(f"[bold red]Failed to stash changes:[/bold red] {error_msg}")
+                            return
+                    
+                    else:  # choice == "3"
+                        self.console.print("[yellow]Update cancelled.[/yellow]")
+                        return
+        except subprocess.CalledProcessError:
+            pass  # Continue if status check fails
+        
+        # Pull the latest changes with explicit origin and branch
+        stashed = False
+        try:
+            pull_output = subprocess.check_output(
+                ["git", "pull", "origin", current_branch], 
+                cwd=app_directory, 
+                stderr=subprocess.STDOUT
+            ).decode('utf-8')
+            self.console.print("[bold green]ValBot repository updated successfully![/bold green]")
+            if pull_output.strip() and not "Already up to date" in pull_output:
+                self.console.print(f"[dim]{pull_output}[/dim]")
+        except subprocess.CalledProcessError as e:
+            error_msg = e.output.decode('utf-8') if e.output else str(e)
+            
+            # Check if it's a merge conflict
+            if "would be overwritten" in error_msg or "Your local changes" in error_msg:
+                self.console.print(f"[bold red]Merge conflict detected:[/bold red]\n{error_msg}\n")
+                self.console.print("[yellow]This shouldn't happen if changes were handled properly.[/yellow]")
+                self.console.print("[yellow]Please report this issue.[/yellow]")
+            else:
+                self.console.print(f"[bold red]Update failed:[/bold red]\n{error_msg}")
             return
-        self.console.print("[bold green]ValBot repository updated successfully![/bold green]")
+        
+        # If we stashed changes, try to reapply them
+        if stashed:
+            self.console.print("\n[yellow]Attempting to restore your local changes...[/yellow]")
+            try:
+                stash_output = subprocess.check_output(["git", "stash", "pop"], cwd=app_directory, stderr=subprocess.STDOUT).decode('utf-8')
+                self.console.print("[green]Local changes restored successfully![/green]")
+                if "CONFLICT" in stash_output:
+                    self.console.print("[bold yellow]⚠️  Some files have conflicts that need manual resolution:[/bold yellow]")
+                    self.console.print(stash_output)
+                    self.console.print("\n[yellow]Run 'git status' to see conflicted files.[/yellow]")
+            except subprocess.CalledProcessError as e:
+                error_msg = e.output.decode('utf-8') if e.output else str(e)
+                if "CONFLICT" in error_msg:
+                    self.console.print("[bold yellow]⚠️  Conflicts occurred while restoring changes:[/bold yellow]")
+                    self.console.print(error_msg)
+                    self.console.print("\n[yellow]Your changes are still in the stash.[/yellow]")
+                    self.console.print("[yellow]Run 'git stash list' to see stashed changes.[/yellow]")
+                else:
+                    self.console.print(f"[bold red]Failed to restore changes:[/bold red] {error_msg}")
+        
+        # Fix file permissions on Linux
+        if sys.platform.startswith('linux'):
+            self.fix_linux_permissions(app_directory)
+        
         if requirements_changed:  self.display_requirements_reinstall_instructions(app_directory, is_frozen)
         if is_frozen:
              self.display_exe_rebuild_instructions(app_directory)
         else:
-            self.reload_callback()
+            if self.reload_callback:
+                self.reload_callback()
 
     def check_requirements_changed_by_commit(self, app_directory, local_commit, remote_commit):
         """Check if requirements.txt changed between two commits."""
@@ -117,6 +238,19 @@ class ValbotUpdater:
             return current_requirements != new_requirements
         except subprocess.CalledProcessError:
             return False
+
+    def fix_linux_permissions(self, app_directory):
+        """Fix file permissions for Linux shell scripts."""
+        try:
+            scripts = ['ec_linux_setup.sh', 'valbot_tui.sh']
+            for script in scripts:
+                script_path = os.path.join(app_directory, script)
+                if os.path.exists(script_path):
+                    subprocess.check_output(['chmod', '+x', script_path], cwd=app_directory, stderr=subprocess.DEVNULL)
+            self.console.print("[dim]Fixed permissions for Linux scripts[/dim]")
+        except Exception as e:
+            # Non-critical error, just log it
+            self.console.print(f"[dim yellow]Note: Could not fix script permissions: {e}[/dim yellow]")
 
     def find_git_repo_for_exe(self):
         """Find the git repository when running from a PyInstaller exe."""

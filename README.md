@@ -22,7 +22,7 @@ ValBot TUI is a powerful, extensible AI assistant with a beautiful Terminal User
 - [Getting Started](#getting-started)
   - [Requirements](#requirements)
   - [Automated Setup (Recommended)](#automated-setup-recommended)
-  - [Setting Up the valbot Alias](#setting-up-the-valbot-alias)
+  - [Alias Setup for Reusability & Team Use](#alias-setup-for-reusability--team-use)
   - [Running the TUI](#running-the-tui)
   - [Manual Installation](#manual-installation)
   - [Python Virtual Environment Setup](#python-virtual-environment-setup-recommended)
@@ -107,9 +107,18 @@ This will:
 
 ---
 
-### Setting Up the `valbot` Alias
+### Alias Setup for Reusability & Team Use
 
-The automated setup scripts configure this automatically. To set up the alias manually:
+The automated setup scripts configure this automatically, enabling easy reusability and team-wide deployment. Once set up, the same ValBot installation can be used by your entire team with personalized settings per user.
+
+**Team Benefits:**
+- **Single Installation**: One ValBot installation can serve multiple team members
+- **Personal Profiles**: Each user maintains their own configuration in `~/.valbot_config.json`
+- **Theme Persistence**: UI themes automatically save to each user's profile (`~/.valbot_theme.json`)
+- **Shared Agents**: Teams can share custom agents while maintaining individual preferences
+- **Easy Onboarding**: New team members just need to set up the alias and their API key
+
+To set up the alias manually:
 
 #### Quick Setup (once per terminal)
 
@@ -198,6 +207,13 @@ source ~/.tcshrc
 ```
 
 **Note:** If you used the automated setup scripts (`setup.bat` or `ec_linux_setup.sh`), the alias should already be configured for you.
+
+**User Profile Files:**
+- `~/.valbot_config.json` - Personal configuration (models, agents, API keys)
+- `~/.valbot_theme.json` - UI theme preferences (auto-saved on theme change)
+- `.env` - API credentials (in ValBot installation directory)
+
+This architecture allows teams to share a single ValBot installation while each member maintains their own personalized settings and theme preferences.
 
 ---
 
@@ -387,6 +403,7 @@ ValBot's primary interface is a beautiful, feature-rich Terminal User Interface 
 🎨 **Modern Material Design Interface**
 - Beautiful dark theme with gradient accents (ValBot Dark theme built-in)
 - Customizable color themes via Textual theme system
+- **Auto-saving themes**: Your theme selection automatically saves to user's profile at `~/.valbot_theme.json` and loads on startup
 - Smooth animations and responsive layout that adapts to terminal size
 - Real-time message streaming with token-by-token display
 - Syntax-highlighted code blocks with one-click copy buttons
@@ -1092,6 +1109,30 @@ Configure these environment variables for authentication:
 - **`VALBOT_CLI_KEY`**: Your API key for the Valbot proxy endpoint (recommended).
 
 Set this in your `.env` file or system environment to authenticate with the API.
+
+### Theme Persistence & Team Usage
+
+ValBot automatically saves your theme preference to `~/.valbot_theme.json` in your home directory. This enables:
+
+- **Automatic theme restoration**: Your chosen theme loads every time you start ValBot
+- **Team-wide installation**: Multiple users can share the same ValBot installation
+- **Personal preferences**: Each user maintains their own theme settings
+- **No configuration needed**: Theme persistence works automatically—just select a theme and it's saved
+
+**How it works:**
+1. Use `/theme` command or theme picker in TUI to select a theme
+2. Theme choice automatically saves to `~/.valbot_theme.json`
+3. Next time you launch ValBot, your theme is restored automatically
+4. Each user on the system has their own separate theme file
+
+**Team deployment:**
+- Install ValBot once in a shared location
+- Each team member sets up the `valbot` alias pointing to the installation
+- Users maintain personal configs in their home directories:
+  - `~/.valbot_config.json` - Personal settings, agents, API keys
+  - `~/.valbot_theme.json` - UI theme preference
+- Shared agents and tools can be added to the main installation
+- Updates benefit the entire team from a single update
 
 ### Model and Endpoint Configuration
 

@@ -102,7 +102,7 @@ This will:
 - Validate existing virtual environments before use
 - Install dependencies with proxy support
 - Detect and optionally reuse existing API key from .env file
-- Generate launcher scripts (valbot.sh and valbot.csh that launch the TUI by default)
+- Generate launcher script (valbot_tui.sh that launches the TUI)
 - Set up aliases for convenient access to ValBot TUI
 
 ---

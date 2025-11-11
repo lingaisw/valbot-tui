@@ -52,6 +52,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
+call :create_tui_launcher
 call :build_valbot_exe
 
 echo ========================================
@@ -62,19 +63,22 @@ echo IMPORTANT: You need to configure your VALBOT_CLI_KEY before running the bot
 echo Set VALBOT_CLI_KEY in the .env file (created in this directory).
 echo.
 echo ========================================
-echo     How to start the ValBot CLI:
+echo     How to start ValBot:
 echo ========================================
 echo.
-echo 1. Run the bot with a message:
+echo 1. Run the TUI (Terminal User Interface) - Recommended:
+echo    .\valbot_tui.bat
+echo.
+echo 2. Run the CLI with a message:
 echo    .\valbot.bat "Your message here"
 echo.
-echo 2. Run with context files:
+echo 3. Run with context files:
 echo    .\valbot.bat -m "Your message" -c file1.txt file2.txt
 echo.
-echo 3. Run with an agent:
+echo 4. Run with an agent:
 echo    .\valbot.bat -a agent_name -p param1=value1 param2=value2
 echo.
-echo 4. Use a custom config file:
+echo 5. Use a custom config file:
 echo    .\valbot.bat --config your_config.json "Your message"
 echo.
 echo Available command line options:
@@ -86,6 +90,7 @@ echo   -p, --params         Parameters for agent (key=value format)
 echo   --config             Path to custom configuration file
 echo.
 echo Examples:
+echo   .\valbot_tui.bat
 echo   .\valbot.bat "Hello, how can you help me?"
 echo   .\valbot.bat -m "Analyze this code" -c myfile.py
 echo   .\valbot.bat -a file_edit_agent -p file=example.py action=review
@@ -132,6 +137,71 @@ if /I "%ANS%"=="Y" (
 ) else (
     echo Proceeding without proxy.
 )
+goto :eof
+
+:create_tui_launcher
+REM Create valbot_tui.bat launcher script
+echo.
+echo Creating ValBot TUI launcher script...
+set "TUI_LAUNCHER=%CD%\valbot_tui.bat"
+
+(
+echo @echo off
+echo REM ValBot TUI Launcher for Windows
+echo REM This script launches the Terminal User Interface version of ValBot
+echo.
+echo setlocal enabledelayedexpansion
+echo.
+echo REM Check if Python is available
+echo python --version ^>nul 2^>^&1
+echo if errorlevel 1 ^(
+echo     echo Error: Python is not installed or not in PATH
+echo     echo Please install Python 3.11+ and try again
+echo     pause
+echo     exit /b 1
+echo ^)
+echo.
+echo REM Get the directory where this script is located
+echo set SCRIPT_DIR=%%~dp0
+echo.
+echo REM Change to the script directory
+echo cd /d "%%SCRIPT_DIR%%"
+echo.
+echo REM Check for virtual environment in multiple locations
+echo set VENV_FOUND=0
+echo set VENV_PATH=
+echo.
+echo for %%%%V in ^(venv valbot-venv .venv^) do ^(
+echo     if exist "%%%%V\Scripts\activate.bat" ^(
+echo         set "VENV_PATH=%%%%V"
+echo         set VENV_FOUND=1
+echo         goto :venv_found
+echo     ^)
+echo ^)
+echo.
+echo :venv_found
+echo if %%VENV_FOUND%%==1 ^(
+echo     echo Activating virtual environment at %%VENV_PATH%%...
+echo     call "%%VENV_PATH%%\Scripts\activate.bat"
+echo ^) else ^(
+echo     echo Warning: Virtual environment not found in common locations ^^^(venv, valbot-venv, .venv^^^)
+echo     echo Running with system Python...
+echo ^)
+echo.
+echo REM Launch the TUI
+echo echo Starting ValBot TUI...
+echo python valbot_tui_launcher.py %%*
+echo.
+echo REM Deactivate virtual environment if it was activated
+echo if defined VIRTUAL_ENV ^(
+echo     deactivate
+echo ^)
+echo.
+echo endlocal
+) > "%TUI_LAUNCHER%"
+
+echo ✅  Created valbot_tui.bat launcher
+echo.
 goto :eof
 
 :build_valbot_exe

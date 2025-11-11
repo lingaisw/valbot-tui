@@ -284,73 +284,81 @@ collect_key_and_env() {
 
 write_runner_scripts() {
   say "
-${BOLD}Step 5:${NC} Create convenience launcher scripts."
-  local bash_runner="$PROJECT_ROOT/valbot.sh"
-  local csh_runner="$PROJECT_ROOT/valbot.csh"
+${BOLD}Step 5:${NC} Create convenience launcher script."
+  local bash_runner="$PROJECT_ROOT/valbot_tui.sh"
 
   if [[ -f "$bash_runner" ]] && ! confirm "Overwrite existing $bash_runner?"; then
     warn "Skipping $bash_runner"
   else
     cat > "$bash_runner" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-VENV_PATH="__VENV_PATH__"
-VALBOT_PATH="__VALBOT_PATH__"
-# If you prefer to read from .env instead, comment the next line and uncomment the .env block below
-export VALBOT_CLI_KEY="__VALBOT_CLI_KEY__"
+#!/bin/bash
+# ValBot TUI Launcher for Unix/Linux/macOS
+# This script launches the Terminal User Interface version of ValBot
 
-# Optional: Read from .env if present (commented by default)
-# if [[ -f "$VALBOT_PATH/.env" ]]; then
-#   set -a; source "$VALBOT_PATH/.env"; set +a
-# fi
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-source "$VENV_PATH/bin/activate"
-python "$VALBOT_PATH/valbot_tui.py" "$@"
-deactivate
+# Change to the script directory
+cd "$SCRIPT_DIR"
+
+# Check if Python is available
+if ! command -v python3 &> /dev/null; then
+    echo "Error: Python 3 is not installed or not in PATH"
+    echo "Please install Python 3.11+ and try again"
+    exit 1
+fi
+
+# Check for virtual environment in multiple locations
+VENV_FOUND=0
+VENV_PATH=""
+
+# Check common venv locations
+for VENV_DIR in "venv" "valbot-venv" ".venv"; do
+    if [ -f "$SCRIPT_DIR/$VENV_DIR/bin/activate" ]; then
+        VENV_PATH="$SCRIPT_DIR/$VENV_DIR"
+        VENV_FOUND=1
+        break
+    fi
+done
+
+# Activate virtual environment if found
+if [ $VENV_FOUND -eq 1 ]; then
+    echo "Activating virtual environment at $VENV_PATH..."
+    source "$VENV_PATH/bin/activate"
+else
+    echo "Warning: Virtual environment not found in common locations (venv, valbot-venv, .venv)"
+    echo "Running with system Python..."
+fi
+
+# Launch the TUI in a new xfce4-terminal window
+# use xfce4-terminal because support for 256-color & more emojis
+echo "Starting ValBot TUI in new terminal..."
+xfce4-terminal --command="bash -c '
+    # Re-activate virtual environment in the new terminal
+    if [ $VENV_FOUND -eq 1 ]; then
+        source \"$VENV_PATH/bin/activate\"
+    fi
+    
+    # Launch the TUI
+    python3 \"$SCRIPT_DIR/valbot_tui_launcher.py\" $@
+'" &
+
+echo "ValBot TUI launched in new terminal window (PID: $!)"
 EOF
-    # Replace placeholders safely
-    sed -i "s|__VENV_PATH__|$VENV_PATH|g" "$bash_runner"
-    sed -i "s|__VALBOT_PATH__|$PROJECT_ROOT|g" "$bash_runner"
-    sed -i "s|__VALBOT_CLI_KEY__|$VALBOT_CLI_KEY_VAL|g" "$bash_runner"
     chmod +x "$bash_runner"
     ok "Wrote $bash_runner"
-  fi
-
-  if [[ -f "$csh_runner" ]] && ! confirm "Overwrite existing $csh_runner?"; then
-    warn "Skipping $csh_runner"
-  else
-    cat > "$csh_runner" <<'EOF'
-#!/bin/tcsh
-onerr exit
-set VENV_PATH="__VENV_PATH__"
-set VALBOT_PATH="__VALBOT_PATH__"
-# If you prefer .env, comment next line and read from file
-setenv VALBOT_CLI_KEY "__VALBOT_CLI_KEY__"
-
-source "$VENV_PATH/bin/activate.csh"
-python "$VALBOT_PATH/valbot_tui.py" $argv
-# deactivate is defined by virtualenv for csh
-deactivate
-EOF
-    # Replace placeholders safely
-    sed -i "s|__VENV_PATH__|$VENV_PATH|g" "$csh_runner"
-    sed -i "s|__VALBOT_PATH__|$PROJECT_ROOT|g" "$csh_runner"
-    sed -i "s|__VALBOT_CLI_KEY__|$VALBOT_CLI_KEY_VAL|g" "$csh_runner"
-    chmod +x "$csh_runner"
-    ok "Wrote $csh_runner"
   fi
 
   say "
 You can create an alias for convenience (add to your shell rc file):"
   say "  - Bash/Zsh: alias valbot=\"$bash_runner\""
-  say "  - tcsh:     alias valbot \"$csh_runner\""
 }
 
 add_aliases_file() {
   say "
 ${BOLD}Step 6:${NC} Optional: add an alias to run valbot-tui from anywhere."
   local aliases_file="$HOME/.aliases"
-  local bash_runner="$PROJECT_ROOT/valbot.sh"
+  local bash_runner="$PROJECT_ROOT/valbot_tui.sh"
   if [[ -f "$aliases_file" ]]; then
     if confirm "Detected $aliases_file. Add alias 'valbot' pointing to $bash_runner?"; then
       if grep -q 'alias valbot ' "$aliases_file"; then
@@ -373,7 +381,6 @@ ${BOLD}Step 6:${NC} Optional: add an alias to run valbot-tui from anywhere."
     warn "No $aliases_file found."
     say "You can still create an alias manually in your shell configuration, for example:"
     say "  - Bash/Zsh: echo 'alias valbot=\"$bash_runner\"' >> ~/.bashrc  # or ~/.zshrc"
-    say "  - tcsh:     echo 'alias valbot \"$PROJECT_ROOT/valbot.csh\"' >> ~/.tcshrc  # or ~/.cshrc"
   fi
 }
 
@@ -381,8 +388,7 @@ final_notes() {
   say "
 ${BOLD}Setup Complete!${NC}"
   say "How to run ValBot TUI:"
-  say "  - Bash/Zsh: $PROJECT_ROOT/valbot.sh"
-  say "  - tcsh:     $PROJECT_ROOT/valbot.csh"
+  say "  - Run: $PROJECT_ROOT/valbot_tui.sh"
   say "  - Or use the alias 'valbot' if you added it to your shell config"
   say "
 Extra tips:"

@@ -185,12 +185,13 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
         from pathlib import Path
         
         # Look for potential file paths (with extensions or absolute/relative paths)
-        # Match patterns like: ./file.txt, ../dir/file.py, C:\path\file.js, /path/to/file, file.md
+        # Match patterns like: ./file.txt, ../dir/file.py, C:\path\file.js, /path/to/file, file.md, agent_plugins/init.py
         file_path_patterns = [
-            r'[./\\][\w/\\.-]+\.\w+',  # Relative paths with extension
-            r'[A-Za-z]:\\[\w\\.-]+',    # Windows absolute paths
-            r'/[\w/.-]+',               # Unix-like paths
-            r'\b[\w-]+\.\w{2,5}\b'      # Simple filenames with extension
+            r'[./\\][\w/\\.-]+\.\w+',      # Relative paths starting with . or \ with extension
+            r'[A-Za-z]:\\[\w\\.-]+',        # Windows absolute paths
+            r'/[\w/.-]+',                   # Unix-like absolute paths
+            r'\b[\w-]+(?:[/\\][\w-]+)+\.\w+', # Subdirectory paths (word/word/file.ext)
+            r'(?<![/\\])(?<!\w)\b[\w-]+\.\w{2,5}\b(?![/\\])'  # Simple filenames not part of a path
         ]
         
         potential_paths = []
@@ -213,41 +214,10 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
         if valid_path_found:
             files_str = ", ".join([f"[bold]{f}[/bold]" for f in valid_files])
             file_word = "file" if len(valid_files) == 1 else "files"
-            self.console.print(f"✅ Found local {file_word}: {files_str}")
-        
-        # Check for file extensions or specific file references
-        file_extensions = ['.py', '.js', '.ts', '.md', '.txt', '.json', '.yml', '.yaml', 
-                          '.toml', '.xml', '.html', '.css', '.sh', '.bat', '.java', '.cpp', 
-                          '.c', '.h', '.rs', '.go', '.rb', '.php', '.sql', '.csv', '.log']
-        has_file_reference = any(ext in message_lower for ext in file_extensions)
-        
-        # Keywords that suggest file or terminal operations
-        tool_keywords = [
-            'list files', 'show files', 'find file', 'search file', 'read file', 
-            'open file', 'display file', 'view file', 'cat ', 'ls ', 'dir ', 
-            'grep', 'search in', 'search for', 'look for',
-            'create file', 'write file', 'edit file', 'modify file', 'save file',
-            'run command', 'execute', 'shell', 'terminal', 'show tree', 'file tree',
-            'directory structure', 'folder structure', 'what files', 'which files',
-            'files in', 'in directory', 'in folder', 'current directory',
-            'list all', 'show all', 'get files', 'see files', 'check files',
-            'summarize', 'summarise', 'summary of', 'contents of', 'what is in',
-            'what does', 'analyze', 'analyse', 'explain', 'review', 'look at',
-            'tell me about', 'show me', 'describe', 'what\'s in'
-        ]
-        has_keyword = any(keyword in message_lower for keyword in tool_keywords)
-        
-        # Prioritize valid file paths, then keywords + file references
-        if valid_path_found:
+            self.console.print(f"Found local {file_word}: {files_str}")
             return True
         
-        # Use tools if we have both a keyword AND file reference (but no valid path found)
-        # This prevents false positives when just discussing file concepts
-        if has_keyword and has_file_reference:
-            self.console.print(f"[dim]→ Using tools (keyword + file reference)[/dim]")
-            return True
-        
-        # Also use tools for directory/file listing commands even without file references
+        # Keywords that suggest directory/file listing operations
         directory_keywords = ['list files', 'show files', 'ls ', 'dir ', 'file tree', 
                              'directory structure', 'show tree', 'list all', 'show all']
         if any(keyword in message_lower for keyword in directory_keywords):

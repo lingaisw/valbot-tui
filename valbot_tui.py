@@ -149,7 +149,7 @@ if IS_LINUX:
         'gear': '⚙️',
         'folder': '◨',
         'file': '◫',
-        'keyboard': '⌨️',
+        'keyboard': '⌨️ ',
     }
 else:
     # Unicode emojis for Windows/Mac
@@ -2309,7 +2309,8 @@ Please check your configuration and try again.
         formatted_matches = []
         for display_name, completion, is_dir in matches:
             desc = f"{EMOJI['folder']} Directory" if is_dir else f"{EMOJI['file']} File"
-            formatted_matches.append((completion, desc))
+            # Use display_name for showing in list (has / for dirs), completion for actual path
+            formatted_matches.append((display_name, desc))
         
         # Store the current word info for completion
         self._file_autocomplete_context = {
@@ -2416,8 +2417,8 @@ Please check your configuration and try again.
                 full_path = os.path.join(base_path, entry)
                 is_dir = os.path.isdir(full_path)
                 
-                # Create display name (add / for directories)
-                display_name = entry + ("/" if is_dir else "")
+                # Create display name (add OS-appropriate separator for directories)
+                display_name = entry + (os.sep if is_dir else "")
                 
                 # Create the completion path
                 if os.path.dirname(partial_path):
@@ -2467,27 +2468,35 @@ Please check your configuration and try again.
         if not matches:
             return False
         
-        # If only one exact match and it's not a directory, complete it directly
-        if len(matches) == 1 and not matches[0][2]:
-            # Direct completion
+        # If only one exact match, complete it directly
+        if len(matches) == 1:
             command_input = self.query_one("#command-input", CommandInput)
             lines = text.split('\n')
             row, col = cursor_pos
             
             if row < len(lines):
                 line = lines[row]
+                # Get the match info
+                display_name, completion, is_dir = matches[0]
+                
+                # Add appropriate suffix: separator for directories, space for files
+                if is_dir:
+                    completion = completion + os.sep
+                else:
+                    completion = completion + " "
+                
                 # Replace the word with the completion
-                new_line = line[:start_col] + matches[0][1] + line[end_col:]
+                new_line = line[:start_col] + completion + line[end_col:]
                 lines[row] = new_line
                 command_input.text = '\n'.join(lines)
                 
                 # Move cursor to end of completed word
-                new_cursor_col = start_col + len(matches[0][1])
+                new_cursor_col = start_col + len(completion)
                 command_input.move_cursor((row, new_cursor_col))
             
             return True
         
-        # Multiple matches or single directory - trigger the real-time check to show autocomplete
+        # Multiple matches - trigger the real-time check to show autocomplete
         self.on_text_changed_check_paths(text, cursor_pos)
         
         return True
@@ -2507,28 +2516,35 @@ Please check your configuration and try again.
             row = context['cursor_row']
             
             # Find the selected match to check if it's a directory
+            # selection now contains display_name (with / for dirs), find the actual completion path
             is_directory = False
+            actual_completion = selection
             if 'matches' in context:
                 for display_name, completion, is_dir in context['matches']:
-                    if completion == selection:
+                    if display_name == selection:
                         is_directory = is_dir
+                        actual_completion = completion
                         break
             
-            # Add appropriate separator for directories
+            # Add appropriate suffix for directories vs files
             if is_directory:
-                # Use OS-appropriate separator (/ for Unix-like, \ for Windows)
-                separator = os.sep
-                selection = selection + separator
+                # Use OS-appropriate separator for directories
+                # Don't add if already ends with a separator
+                if not actual_completion.endswith(os.sep):
+                    actual_completion = actual_completion + os.sep
+            else:
+                # Add space after file selection
+                actual_completion = actual_completion + " "
             
             if row < len(lines):
                 line = lines[row]
                 # Replace the word with the selected path
-                new_line = line[:context['start_col']] + selection + line[context['end_col']:]
+                new_line = line[:context['start_col']] + actual_completion + line[context['end_col']:]
                 lines[row] = new_line
                 command_input.text = '\n'.join(lines)
                 
                 # Move cursor to end of completed path
-                new_cursor_col = context['start_col'] + len(selection)
+                new_cursor_col = context['start_col'] + len(actual_completion)
                 command_input.move_cursor((row, new_cursor_col))
             
             # Always close the autocomplete and clear context after selection

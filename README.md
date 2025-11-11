@@ -17,98 +17,71 @@ ValBot TUI is a powerful, extensible AI assistant with a beautiful Terminal User
 
 ---
 
-## Table of Contents
-
-- [Getting Started](#getting-started)
-  - [Requirements](#requirements)
-  - [Automated Setup (Recommended)](#automated-setup-recommended)
-  - [Setting Up the valbot Alias](#setting-up-the-valbot-alias)
-  - [Running the TUI](#running-the-tui)
-  - [Manual Installation](#manual-installation)
-  - [Virtual Environment Setup](#virtual-environment-setup-recommended)
-  - [Configuration](#configuration)
-- [ValBot TUI - Your AI Assistant Interface](#valbot-tui---your-ai-assistant-interface)
-  - [Why Use the TUI?](#why-use-the-tui)
-  - [TUI Features](#tui-features)
-  - [TUI Slash Commands](#tui-slash-commands)
-  - [TUI Usage Examples](#tui-usage-examples)
-  - [TUI Tips & Best Practices](#tui-tips--best-practices)
-  - [Troubleshooting TUI](#troubleshooting-tui)
-- [CLI Mode (Alternative Text Interface)](#cli-mode-alternative-text-interface)
-- [Agents - Autonomous AI Workflows](#agents---autonomous-ai-workflows)
-  - [Adding Agents Interactively](#adding-agents-interactively-with-add_agent)
-  - [Adding Tools](#adding-tools-with-add_tool)
-  - [Getting Agents from Others](#getting-agents-from-others)
-  - [Adding Agents Manually](#adding-agents-manually)
-  - [Creating Your Own Agents](#creating-your-own-agents)
-  - [Custom Agent Commands](#custom-agent-commands)
-- [Keeping ValBot Updated](#keeping-valbot-updated)
-- [Advanced Configuration](#advanced-configuration)
-  - [Configuration Files](#configuration-files)
-  - [Environment Variables](#environment-variables)
-  - [Model and Endpoint Configuration](#model-and-endpoint-configuration)
-  - [Agent Extensions Configuration](#agent-extensions-configuration)
-  - [Custom Agent Commands Configuration](#custom-agent-commands-configuration)
-  - [Custom Prompts Configuration](#custom-prompts-configuration)
-  - [Command-Line Arguments Reference](#command-line-arguments-reference)
-  - [Troubleshooting](#troubleshooting)
-
----
-
 ## Getting Started
 
 ### Requirements
 
-- Python 3.10+ (Python 3.11+ recommended)
+- Python 3.11+
 - Modern terminal emulator (Windows Terminal, iTerm2, GNOME Terminal, or Alacritty recommended)
 - Terminal with 256-color or true color support
 
-### Automated Setup (Recommended)
+### Quick Installation
 
-For the easiest setup experience with automatic virtual environment creation, dependency installation, and configuration, use our automated setup scripts:
-
-#### Windows: setup.bat
-
-```bat
-git clone https://github.com/lingaisw/valbot-tui valbot-tui
-cd valbot-tui
-.\setup.bat
-```
-
-This will:
-- Interactively create or use an existing virtual environment with flexible path selection
-- Option to use existing venv, delete and recreate, or choose a different path
-- Validate existing virtual environments before use
-- Install all dependencies with optional proxy support
-- Detect and optionally reuse existing API key from .env file
-- Prompt for your API key if not already configured
-- Build a standalone executable (optional)
-- Set up the `valbot` alias for easy access
-
-#### Intel EC Linux: ec_linux_setup.sh
-
+**1. Clone the repository:**
 ```bash
 git clone https://github.com/lingaisw/valbot-tui valbot-tui
 cd valbot-tui
-chmod +x ec_linux_setup.sh
-./ec_linux_setup.sh
 ```
 
-This will:
-- Let you select Python interpreter (auto-detects EC default paths)
-- Interactively create or use an existing virtual environment with flexible path selection
-- Option to use existing venv, delete and recreate, or choose a different path
-- Validate existing virtual environments before use
-- Install dependencies with proxy support
-- Detect and optionally reuse existing API key from .env file
-- Generate launcher scripts (valbot.sh and valbot.csh that launch the TUI by default)
-- Set up aliases for convenient access to ValBot TUI
+**2. Install dependencies:**
+```bash
+pip install -r requirements.txt
+```
 
----
+For Linux EC with proxy:
+```bash
+pip install --proxy="http://proxy-chain.intel.com:911" -r requirements.txt
+```
 
-### Setting Up the `valbot` Alias
+**3. Configure your API key:**
 
-The automated setup scripts configure this automatically. To set up the alias manually:
+Create a `.env` file in the repository root:
+```bash
+VALBOT_CLI_KEY=your_api_key_here
+```
+
+Or set it in your environment:
+```bash
+export VALBOT_CLI_KEY="your_api_key_here"
+```
+
+Get your API key at: https://genai-proxy.intel.com/ → "Manage Your API Tokens" → "Create New Token"
+
+**4. Launch ValBot TUI:**
+
+```bash
+valbot
+```
+
+Alternatively, you can use the platform-specific scripts:
+
+**Windows:**
+```cmd
+valbot_tui.bat
+```
+
+**Linux/macOS:**
+```bash
+./valbot_tui.sh
+```
+
+**Note:** The launcher scripts automatically detect virtual environments in common locations (`venv`, `valbot-venv`, `.venv`). If a virtual environment is found, it will be activated automatically. If not found, the scripts will run with your system Python installation.
+
+That's it! The TUI will launch with a beautiful interface ready for your AI conversations.
+
+#### Setting Up the `valbot` Alias Manually
+
+To use the `valbot` command from anywhere, you can set up an alias manually:
 
 **Windows (PowerShell):**
 
@@ -118,7 +91,7 @@ Add to your PowerShell profile (`$PROFILE`):
 notepad $PROFILE
 
 # Add this line (replace with your actual path):
-function valbot { & "C:\path\to\valbot-cli-main\valbot_tui.bat" $args }
+function valbot { & "valbot_tui.bat" $args }
 ```
 
 After saving, reload your profile:
@@ -139,7 +112,7 @@ Create a batch file named `valbot.bat` in a directory that's in your PATH (e.g.,
 Add to your `~/.bashrc` or `~/.bash_profile`:
 ```bash
 # Add this line (replace with your actual path):
-alias valbot="/path/to/valbot-cli-main/valbot_tui.sh"
+alias valbot "valbot_tui.sh"
 ```
 
 Then reload your shell configuration:
@@ -175,101 +148,41 @@ source ~/.tcshrc
 
 **Note:** If you used the automated setup scripts (`setup.bat` or `ec_linux_setup.sh`), the alias should already be configured for you.
 
----
+### Automated Setup Scripts (Alternative)
 
-### Running the TUI
+For a fully automated setup with virtual environment creation and configuration, use the included scripts:
 
-Once setup is complete, launch ValBot with:
+#### Windows: setup.bat
+
+```bat
+.\setup.bat
+```
+
+This will:
+- Interactively create or use an existing virtual environment with flexible path selection
+- Option to use existing venv, delete and recreate, or choose a different path
+- Validate existing virtual environments before use
+- Install all dependencies with optional proxy support
+- Detect and optionally reuse existing API key from .env file
+- Prompt for your API key if not already configured
+- Build a standalone executable (optional)
+
+#### Intel EC Linux: ec_linux_setup.sh
 
 ```bash
-valbot
+chmod +x ec_linux_setup.sh
+./ec_linux_setup.sh
 ```
 
-**Alternative launch methods:**
-
-**Windows:**
-
-Using the provided batch file:
-```cmd
-valbot_tui.bat
-```
-
-Using Python directly:
-```cmd
-python valbot_tui_launcher.py
-```
-
-With custom configuration:
-```cmd
-python app.py --tui --config my_config.json
-```
-
-**Linux/macOS:**
-
-Using the launcher script:
-```bash
-./valbot_tui.sh
-```
-
-Using Python directly:
-```bash
-python valbot_tui_launcher.py
-```
-
-With custom configuration:
-```bash
-python app.py --tui --config my_config.json
-```
-
-**Note:** The launcher scripts automatically detect virtual environments in common locations (`venv`, `valbot-venv`, `.venv`). If a virtual environment is found, it will be activated automatically.
-
----
-
-### Manual Installation
-
-If you prefer manual setup or need more control over the installation process:
-
-**1. Clone the repository:**
-```bash
-git clone https://github.com/lingaisw/valbot-tui valbot-tui
-cd valbot-tui
-```
-
-**2. Install dependencies:**
-```bash
-pip install -r requirements.txt
-```
-
-For Linux EC with proxy:
-```bash
-pip install --proxy="http://proxy-chain.intel.com:911" -r requirements.txt
-```
-
-**3. Configure your API key:**
-
-Create a `.env` file in the repository root:
-```bash
-VALBOT_CLI_KEY=your_api_key_here
-```
-
-Or set it in your environment:
-```bash
-export VALBOT_CLI_KEY="your_api_key_here"
-```
-
-Get your API key at: https://genai-proxy.intel.com/ → "Manage Your API Tokens" → "Create New Token"
-
-**4. Set up the valbot alias** (see [Setting Up the valbot Alias](#setting-up-the-valbot-alias))
-
-**5. Launch ValBot TUI:**
-
-```bash
-valbot
-```
-
-Or use the platform-specific scripts (see [Running the TUI](#running-the-tui))
-
----
+This will:
+- Let you select Python interpreter (auto-detects EC default paths)
+- Interactively create or use an existing virtual environment with flexible path selection
+- Option to use existing venv, delete and recreate, or choose a different path
+- Validate existing virtual environments before use
+- Install dependencies with proxy support
+- Detect and optionally reuse existing API key from .env file
+- Generate launcher scripts (valbot.sh and valbot.csh that launch the TUI by default)
+- Set up aliases for convenient access to ValBot TUI
 
 ### Virtual Environment Setup (Recommended)
 
@@ -374,25 +287,14 @@ ValBot's primary interface is a beautiful, feature-rich Terminal User Interface 
 - **Real-time streaming**: Watch AI responses appear character-by-character as they're generated
 - **Message organization**: Clear visual differentiation between user and assistant messages with timestamps
 - **Multi-line input**: Built-in TextArea widget with auto-expanding height (3-10 lines)
-  - **Smart enter behavior**: Enter submits, Shift+Enter or ↓ for new lines
-  - **Auto-height adjustment**: Input box grows/shrinks based on content (3-10 lines)
-  - **Busy state protection**: Blocks submissions while AI is processing
 - **Command autocomplete**: Type `/` to see smart suggestions for all available commands with descriptions
-  - **Live filtering**: Suggestions update as you type
-  - **Keyboard navigation**: Use ↑↓ arrows or Tab to navigate, Enter to select
-  - **Context-aware**: Shows relevant commands based on your input
 - **File path autocomplete**: Automatic path completion with fuzzy matching as you type file paths
-  - **Tab-triggered**: Press Tab on any word to get path suggestions
-  - **Smart detection**: Recognizes file path patterns automatically
-  - **Real-time filtering**: Updates suggestions as you continue typing
-  - **Works in all commands**: Autocomplete for `/context`, `/file`, and any path parameter
 - **Reasoning display**: Shows GPT-5 thinking process in dedicated panel when `display_reasoning` enabled
 - **Visual feedback**: Loading animations, progress indicators, and status messages for all operations
 - **Configurable reasoning**: Set effort levels (low/medium/high) for AI reasoning depth
 - **Response streaming**: Proper event handling with ResponseAudioDeltaEvent and ResponseTextDeltaEvent
 - **Session management**: Save and load chat sessions (in development)
 - **Message history**: Scroll through complete conversation history with syntax preservation
-- **Notification system**: Toast notifications for errors, warnings, and important events
 
 🖥️ **Integrated Terminal Panel**
 - **Execute commands directly**: Run any shell command with `/terminal` without leaving the chat
@@ -406,16 +308,7 @@ ValBot's primary interface is a beautiful, feature-rich Terminal User Interface 
 
 📁 **File System Integration**
 - **Interactive file explorer**: Built-in DirectoryTree widget with expandable folders
-- **Full navigation controls**: Back/forward history, up directory, refresh, and address bar
-  - **Browser-style navigation**: Navigate with ← Back, → Forward, ↑ Up buttons
-  - **Address bar**: Type or paste paths directly for instant navigation
-  - **Keyboard shortcuts**: Use arrow keys to browse folders
-  - **Smart path detection**: Auto-complete and navigate as you type in address bar
-  - **History tracking**: Full back/forward navigation history like a web browser
 - **File path autocomplete**: Smart autocomplete with fuzzy matching for file paths in commands
-  - Press `Tab` to trigger path suggestions for current word
-  - Works with relative and absolute paths
-  - Automatically filters as you type
 - **Direct file loading**: Click any file in explorer to load into conversation context
 - **Glob pattern support**: Use patterns like `src/**/*.py` to load multiple files at once
 - **Visual feedback**: See loaded files confirmed in chat with file count and syntax preview
@@ -423,10 +316,6 @@ ValBot's primary interface is a beautiful, feature-rich Terminal User Interface 
 - **File content preview**: View file contents in formatted panels before loading
 - **Toggle with hotkey**: Press `Ctrl+F` to show/hide file explorer panel
 - **Current directory aware**: File explorer starts at your working directory
-- **Large file handling**: Intelligent chunked reading with size limits (100MB default)
-  - Prevents memory issues with large files
-  - Shows file size warnings before loading
-  - Reads files in 8KB chunks for efficiency
 
 ⌨️ **Keyboard Shortcuts & Navigation**
 - **`Ctrl+Q`** - Quit application gracefully
@@ -476,6 +365,80 @@ ValBot's primary interface is a beautiful, feature-rich Terminal User Interface 
 - **Welcome message**: Informative welcome screen with quick start tips
 - **Status bar**: Live status indicators showing model, session state, and connection status
 - **Loading animations**: Smooth loading indicators with animated messages
+
+### Installing TUI Dependencies
+
+The TUI requires additional Python packages. Install them with:
+
+```bash
+pip install textual textual-dev
+```
+
+Or reinstall all requirements (includes TUI libraries):
+
+```bash
+pip install -r requirements.txt
+```
+
+**For Linux EC with proxy:**
+```bash
+pip install --proxy="http://proxy-chain.intel.com:911" textual textual-dev
+# Or reinstall all requirements
+pip install --proxy="http://proxy-chain.intel.com:911" -r requirements.txt
+```
+
+### Running the TUI
+
+**Using the valbot alias (recommended):**
+```bash
+valbot
+```
+
+#### Alternative Launch Methods
+
+**Windows:**
+
+Using the provided batch file:
+```cmd
+valbot_tui.bat
+```
+
+Using Python directly:
+```cmd
+python valbot_tui_launcher.py
+```
+
+With custom configuration:
+```cmd
+python app.py --tui --config my_config.json
+```
+
+From main app:
+```cmd
+python app.py --tui
+```
+
+**Linux/macOS:**
+
+Using the launcher script:
+```bash
+./valbot_tui.sh
+```
+
+Using Python directly:
+```bash
+python valbot_tui_launcher.py
+```
+
+With custom configuration:
+```bash
+python app.py --tui --config my_config.json
+```
+
+From main app:
+```bash
+python app.py --tui
+```
 
 ### TUI Slash Commands
 

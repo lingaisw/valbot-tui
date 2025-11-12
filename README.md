@@ -68,24 +68,6 @@ ValBot TUI is a powerful, extensible AI assistant with a beautiful Terminal User
 
 For the easiest setup experience with automatic virtual environment creation, dependency installation, and configuration, use our automated setup scripts:
 
-#### Windows: setup.bat
-
-```bat
-git clone https://github.com/lingaisw/valbot-tui valbot-tui
-cd valbot-tui
-.\setup.bat
-```
-
-This will:
-- Interactively create or use an existing virtual environment with flexible path selection
-- Option to use existing venv, delete and recreate, or choose a different path
-- Validate existing virtual environments before use
-- Install all dependencies with optional proxy support
-- Detect and optionally reuse existing API key from .env file
-- Prompt for your API key if not already configured
-- Build a standalone executable (optional)
-- Set up the `valbot` alias for easy access
-
 #### Intel EC Linux: ec_linux_setup.sh
 
 ```bash
@@ -105,6 +87,24 @@ This will:
 - Generate launcher script (valbot_tui.sh that launches the TUI)
 - Set up aliases for convenient access to ValBot TUI
 
+#### Windows: setup.bat
+
+```bat
+git clone https://github.com/lingaisw/valbot-tui valbot-tui
+cd valbot-tui
+.\setup.bat
+```
+
+This will:
+- Interactively create or use an existing virtual environment with flexible path selection
+- Option to use existing venv, delete and recreate, or choose a different path
+- Validate existing virtual environments before use
+- Install all dependencies with optional proxy support
+- Detect and optionally reuse existing API key from .env file
+- Prompt for your API key if not already configured
+- Build a standalone executable (optional)
+- Set up the `valbot` alias for easy access
+
 ---
 
 ### Alias Setup for Reusability & Team Use
@@ -116,7 +116,31 @@ The automated setup scripts configure this automatically, enabling easy reusabil
 - **Personal Profiles**: Each user maintains their own configuration in `~/.valbot_config.json`
 - **Theme Persistence**: UI themes automatically save to each user's profile (`~/.valbot_theme.json`)
 - **Shared Agents**: Teams can share custom agents while maintaining individual preferences
-- **Easy Onboarding**: New team members just need to set up the alias and their API key
+- **Easy Onboarding**: New team members just need to run the alias setup script
+
+#### Quick Team Setup (Linux/macOS)
+
+For team members joining an existing ValBot installation:
+
+```bash
+# Navigate to the shared ValBot installation
+cd /path/to/valbot-cli-main
+
+# Run the alias setup script
+source valbot_tui_alias_setup.sh
+
+# Open a new terminal and run
+valbot
+```
+
+This script will:
+- Add the `valbot` alias to your `~/.aliases` file
+- Handle existing alias conflicts automatically
+- Provide clear instructions for activation
+
+After setup, simply run `valbot` from anywhere to launch the TUI!
+
+#### Manual Alias Setup
 
 To set up the alias manually:
 
@@ -124,24 +148,76 @@ To set up the alias manually:
 
 Use these commands for temporary access in your current terminal session:
 
+**EC Linux/Linux/macOS (Bash):**
+```bash
+alias valbot="/path/to/valbot-cli-main/valbot_tui.sh"
+```
+
 **Windows (PowerShell):**
 ```powershell
 function valbot { & "C:\path\to\valbot-cli-main\valbot_tui.bat" $args }
 ```
 
-**Windows:**
+**Windows (Command Prompt):**
 ```cmd
 doskey valbot="C:\path\to\valbot-cli-main\valbot_tui.bat" $*
-```
-
-**Linux/macOS:**
-```bash
-alias valbot="/path/to/valbot-cli-main/valbot_tui.sh"
 ```
 
 #### Permanent Setup (once per session)
 
 For persistent access across all terminal sessions:
+
+**EC Linux/Linux (Bash):**
+
+Add to your `~/.bashrc` or `~/.bash_profile`:
+```bash
+# Add this line (replace with your actual path):
+alias valbot="/path/to/valbot-cli-main/valbot_tui.sh"
+```
+
+Then reload your shell configuration:
+```bash
+source ~/.bashrc
+```
+
+**EC Linux (tcsh/csh):**
+
+Add to your `~/.tcshrc` or `~/.cshrc`:
+```tcsh
+# Add this line (replace with your actual path):
+alias valbot "/path/to/valbot-cli-main/valbot_tui.sh"
+```
+
+Then reload your shell configuration:
+```tcsh
+source ~/.tcshrc
+```
+
+**macOS (Bash):**
+
+Add to your `~/.bash_profile`:
+```bash
+# Add this line (replace with your actual path):
+alias valbot="/path/to/valbot-cli-main/valbot_tui.sh"
+```
+
+Then reload your shell configuration:
+```bash
+source ~/.bash_profile
+```
+
+**macOS (Zsh):**
+
+Add to your `~/.zshrc`:
+```bash
+# Add this line (replace with your actual path):
+alias valbot="/path/to/valbot-cli-main/valbot_tui.sh"
+```
+
+Then reload your shell configuration:
+```bash
+source ~/.zshrc
+```
 
 **Windows (PowerShell):**
 
@@ -167,45 +243,6 @@ Create a batch file named `valbot.bat` in a directory that's in your PATH (e.g.,
 "C:\path\to\valbot-cli-main\valbot_tui.bat" %*
 ```
 
-**Linux/macOS (Bash):**
-
-Add to your `~/.bashrc` or `~/.bash_profile`:
-```bash
-# Add this line (replace with your actual path):
-alias valbot="/path/to/valbot-cli-main/valbot_tui.sh"
-```
-
-Then reload your shell configuration:
-```bash
-source ~/.bashrc
-```
-
-**Linux/macOS (Zsh):**
-
-Add to your `~/.zshrc`:
-```bash
-# Add this line (replace with your actual path):
-alias valbot="/path/to/valbot-cli-main/valbot_tui.sh"
-```
-
-Then reload your shell configuration:
-```bash
-source ~/.zshrc
-```
-
-**Linux/macOS (tcsh/csh):**
-
-Add to your `~/.tcshrc` or `~/.cshrc`:
-```tcsh
-# Add this line (replace with your actual path):
-alias valbot "/path/to/valbot-cli-main/valbot_tui.sh"
-```
-
-Then reload your shell configuration:
-```tcsh
-source ~/.tcshrc
-```
-
 **Note:** If you used the automated setup scripts (`setup.bat` or `ec_linux_setup.sh`), the alias should already be configured for you.
 
 **User Profile Files:**
@@ -227,6 +264,23 @@ valbot
 
 **Alternative launch methods:**
 
+**EC Linux/Linux/macOS:**
+
+Using the launcher script:
+```bash
+./valbot_tui.sh
+```
+
+Using Python directly:
+```bash
+python valbot_tui_launcher.py
+```
+
+With custom configuration:
+```bash
+python app.py --tui --config my_config.json
+```
+
 **Windows:**
 
 Using the provided batch file:
@@ -241,23 +295,6 @@ python valbot_tui_launcher.py
 
 With custom configuration:
 ```cmd
-python app.py --tui --config my_config.json
-```
-
-**Linux/macOS:**
-
-Using the launcher script:
-```bash
-./valbot_tui.sh
-```
-
-Using Python directly:
-```bash
-python valbot_tui_launcher.py
-```
-
-With custom configuration:
-```bash
 python app.py --tui --config my_config.json
 ```
 
@@ -276,25 +313,37 @@ cd valbot-tui
 ```
 
 **2. Install dependencies:**
-```bash
-pip install -r requirements.txt
-```
 
-For Linux EC with proxy:
+For EC Linux with proxy:
 ```bash
 pip install --proxy="http://proxy-chain.intel.com:911" -r requirements.txt
 ```
 
+For Linux/macOS:
+```bash
+pip install -r requirements.txt
+```
+
+For Windows:
+```bash
+pip install -r requirements.txt
+```
+
 **3. Configure your API key:**
 
-Create a `.env` file in the repository root:
+For EC Linux/Linux/macOS, set it in your environment:
+```bash
+export VALBOT_CLI_KEY="your_api_key_here"
+```
+
+Or create a `.env` file in the repository root:
 ```bash
 VALBOT_CLI_KEY=your_api_key_here
 ```
 
-Or set it in your environment:
+For Windows, create a `.env` file in the repository root:
 ```bash
-export VALBOT_CLI_KEY="your_api_key_here"
+VALBOT_CLI_KEY=your_api_key_here
 ```
 
 Get your API key at: https://genai-proxy.intel.com/ → "Manage Your API Tokens" → "Create New Token"
@@ -317,23 +366,29 @@ Using a virtual environment prevents package conflicts:
 
 **Create and activate virtual environment:**
 
-**Windows:**
-```cmd
-python -m venv venv
-venv\Scripts\activate
+**Intel EC Linux (tcsh):**
+```tcsh
+setenv VENV_PATH /path/to/create/your/valbot-venv
+/usr/intel/pkgs/python3/3.11.1/bin/python3 -m venv $VENV_PATH
+source $VENV_PATH/bin/activate.csh
 ```
 
-**Linux/macOS:**
+**Intel EC Linux/Linux (Bash):**
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 ```
 
-**Intel EC (tcsh):**
-```tcsh
-setenv VENV_PATH /path/to/create/your/valbot-venv
-/usr/intel/pkgs/python3/3.11.1/bin/python3 -m venv $VENV_PATH
-source $VENV_PATH/bin/activate.csh
+**macOS:**
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+**Windows:**
+```cmd
+python -m venv venv
+venv\Scripts\activate
 ```
 
 Then install dependencies:

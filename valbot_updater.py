@@ -121,14 +121,19 @@ class ValbotUpdater:
         try:
             status_output = subprocess.check_output(["git", "status", "--porcelain"], cwd=app_directory).decode('utf-8').strip()
             if status_output:
-                # Parse modified files
+                # Parse modified files and filter out ignored files/folders
                 modified_files = []
+                ignored_patterns = ['.env', '__pycache__', 'valbot-venv']
+                
                 for line in status_output.split('\n'):
                     if line.strip():
                         # Get filename (last part after spaces)
                         parts = line.strip().split()
                         if len(parts) >= 2:
-                            modified_files.append(parts[-1])
+                            filename = parts[-1]
+                            # Skip files matching ignored patterns
+                            if not any(ignored in filename for ignored in ignored_patterns):
+                                modified_files.append(filename)
                 
                 if modified_files:
                     self.console.print("[bold yellow]⚠️  Local Changes Detected[/bold yellow]\n")
@@ -141,9 +146,10 @@ class ValbotUpdater:
                     self.console.print("[yellow]Choose how to handle these changes:[/yellow]")
                     self.console.print("1. [bold]Overwrite[/bold] - Discard local changes and use repository version")
                     self.console.print("2. [bold]Keep[/bold] - Keep local changes and skip update")
-                    self.console.print("3. [bold]Cancel[/bold] - Cancel the update\n")
+                    self.console.print("3. [bold]Resolve Each File[/bold] - Choose action for each file individually")
+                    self.console.print("4. [bold]Cancel[/bold] - Cancel the update\n")
                     
-                    choice = Prompt.ask("Your choice", choices=["1", "2", "3"], default="3")
+                    choice = Prompt.ask("Your choice", choices=["1", "2", "3", "4"], default="4")
                     
                     if choice == "1":
                         # Stash changes and pull
@@ -170,7 +176,52 @@ class ValbotUpdater:
                             self.console.print(f"[bold red]Failed to stash changes:[/bold red] {error_msg}")
                             return
                     
-                    else:  # choice == "3"
+                    elif choice == "3":
+                        # Resolve each file individually
+                        self.console.print("\n[bold yellow]Resolving files individually...[/bold yellow]\n")
+                        files_to_discard = []
+                        files_to_keep = []
+                        
+                        for file_path in modified_files:
+                            self.console.print(f"[bold cyan]File:[/bold cyan] {file_path}")
+                            self.console.print("  1. [bold]Overwrite[/bold] - Use repository version")
+                            self.console.print("  2. [bold]Keep[/bold] - Keep your local changes")
+                            
+                            file_choice = Prompt.ask("  Your choice", choices=["1", "2"], default="2")
+                            
+                            if file_choice == "1":
+                                files_to_discard.append(file_path)
+                            else:
+                                files_to_keep.append(file_path)
+                            self.console.print("")
+                        
+                        # Apply choices
+                        if files_to_discard:
+                            self.console.print(f"[yellow]Discarding changes for {len(files_to_discard)} file(s)...[/yellow]")
+                            try:
+                                for file_path in files_to_discard:
+                                    subprocess.check_output(["git", "checkout", "HEAD", "--", file_path], cwd=app_directory, stderr=subprocess.STDOUT)
+                                self.console.print("[green]Selected files reverted to repository version.[/green]")
+                            except subprocess.CalledProcessError as e:
+                                error_msg = e.output.decode('utf-8') if e.output else str(e)
+                                self.console.print(f"[bold red]Failed to discard changes:[/bold red] {error_msg}")
+                                return
+                        
+                        if files_to_keep:
+                            self.console.print(f"[yellow]Saving local changes for {len(files_to_keep)} file(s)...[/yellow]")
+                            try:
+                                # Stash only the files we want to keep
+                                for file_path in files_to_keep:
+                                    subprocess.check_output(["git", "add", file_path], cwd=app_directory, stderr=subprocess.STDOUT)
+                                subprocess.check_output(["git", "stash", "push", "-m", "ValBot update - kept files"], cwd=app_directory, stderr=subprocess.STDOUT)
+                                self.console.print("[green]Local changes saved.[/green]")
+                                stashed = True
+                            except subprocess.CalledProcessError as e:
+                                error_msg = e.output.decode('utf-8') if e.output else str(e)
+                                self.console.print(f"[bold red]Failed to stash changes:[/bold red] {error_msg}")
+                                return
+                    
+                    else:  # choice == "4"
                         self.console.print("[yellow]Update cancelled.[/yellow]")
                         return
         except subprocess.CalledProcessError:

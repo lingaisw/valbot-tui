@@ -144,8 +144,8 @@ class ValbotUpdater:
                     
                     # Ask user how to handle conflicts
                     self.console.print("[yellow]Choose how to handle these changes:[/yellow]")
-                    self.console.print("1. [bold]Overwrite[/bold] - Discard local changes and use repository version")
-                    self.console.print("2. [bold]Keep[/bold] - Keep local changes and skip update")
+                    self.console.print("1. [bold]Overwrite All[/bold] - Discard all local changes and use repository version")
+                    self.console.print("2. [bold]Keep All[/bold] - Keep all local changes and skip update for those files")
                     self.console.print("3. [bold]Resolve Each File[/bold] - Choose action for each file individually")
                     self.console.print("4. [bold]Cancel[/bold] - Cancel the update\n")
                     

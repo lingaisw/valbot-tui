@@ -141,9 +141,14 @@ class MyCustomPlugin(AgentPlugin):
         agent_dir = Path(__file__).parent
         self.agent_dir = agent_dir  # Store for later reference
         
+        # Set up the resources directory for RAG files
+        resources_dir = agent_dir / "pdl_agent_resources"
+        resources_dir.mkdir(parents=True, exist_ok=True)
+        
         try:
             self.rag_kb = RAGKnowledgeBase(
-                pdf_dir=agent_dir,
+                pdf_dir=resources_dir,
+                cache_dir=resources_dir,  # Use same location for cache and RAG
                 chunk_size=1000,
                 chunk_overlap=200,
                 collection_name="tessent_pdl_knowledge"
@@ -166,7 +171,7 @@ class MyCustomPlugin(AgentPlugin):
             self.rag_kb.load_docx_files(spf_doc_files, force_reload=False)
             
             # Also load example.pdl as a text document into RAG
-            example_pdl_path = agent_dir / "example.pdl"
+            example_pdl_path = resources_dir / "example.pdl"
             if example_pdl_path.exists():
                 self.rag_kb.load_text_file(example_pdl_path, source_name="example.pdl")
                 self.console.print(f"[green]✓ example.pdl loaded into RAG KB[/green]")
@@ -221,6 +226,7 @@ class MyCustomPlugin(AgentPlugin):
         """
         knowledge = []
         agent_dir = Path(__file__).parent
+        resources_dir = agent_dir / "pdl_agent_resources"
         
         pdf_files = [
             "tessent_shell_reference_manual.pdf",
@@ -231,7 +237,7 @@ class MyCustomPlugin(AgentPlugin):
         self.console.print("[bold yellow]Loading knowledge base (legacy mode)...[/bold yellow]")
         
         for pdf_file in pdf_files:
-            pdf_path = agent_dir / pdf_file
+            pdf_path = resources_dir / pdf_file
             if pdf_path.exists():
                 try:
                     with open(pdf_path, 'rb') as file:

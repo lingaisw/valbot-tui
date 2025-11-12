@@ -1,0 +1,270 @@
+#SPF: $SPF_ROOT/bin/spf --testSeqFile pch_dfx_pgcb_ovrd_test_PARFUSE.spf --tapSpecFile $TAPSPFSPEC --itppFile pch_dfx_pgcb_ovrd_test_PARFUSE.itpp
+
+#########################DFX_CLUSTER_STAP : PGCB_DEBUG_OVR#######################;
+
+label "DFX_PARFUSE_STAP_Number_of_PGCBs_in_the_partition_is_2";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.fdfx_pgcb_bypass 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.fdfx_pgcb_ovr 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.fdfx_pgcb_bypass 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.fdfx_pgcb_ovr 0";
+
+focus_tap DFX_PARFUSE_STAP;
+label "Write_PGCB_Override_DFX_PARFUSE_STAP_Bypass_and_Override_Power_On";
+set PGCB_DEBUG_OVR[32:1] = 'b01010101010101010101010101010101;
+flush;
+pass itpp "vector: TMS(0), 5;";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.fdfx_pgcb_bypass 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.fdfx_pgcb_ovr 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_isol_en_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_force_rst_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_ip_fet_en_b 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_sleep 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.fdfx_pgcb_bypass 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.fdfx_pgcb_ovr 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_isol_en_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_force_rst_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_ip_fet_en_b 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_sleep 0";
+
+label "Read_PGCB_Override_DFX_PARFUSE_STAP_Bypass_and_Override_Power_On";
+compare PGCB_DEBUG_OVR_RO[32:1] = 'b01010101010101010101010101010101;
+compare PGCB_DEBUG_OVR[32:1] = 'b01010101010101010101010101010101;
+flush;
+
+focus_tap DFX_PARFUSE_STAP;
+label "Write_PGCB_Override_DFX_PARFUSE_STAP_Bypass_and_Override_Power_Off";
+set PGCB_DEBUG_OVR[32:1] = 'b11111111111111111111111111111111;
+flush;
+pass itpp "vector: TMS(0), 5;";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.fdfx_pgcb_bypass 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.fdfx_pgcb_ovr 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_isol_en_b 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_force_rst_b 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_ip_fet_en_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_sleep 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.fdfx_pgcb_bypass 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.fdfx_pgcb_ovr 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_isol_en_b 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_force_rst_b 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_ip_fet_en_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_sleep 1";
+
+label "Read_PGCB_Override_DFX_PARFUSE_STAP_Bypass_and_Override_Power_Off";
+compare PGCB_DEBUG_OVR_RO[32:1] = 'b11111111111111111111111111111111;
+compare PGCB_DEBUG_OVR[32:1] = 'b11111111111111111111111111111111;
+flush;
+
+focus_tap DFX_PARFUSE_STAP;
+label "Write_PGCB_Override_DFX_PARFUSE_STAP_Bypass_and_Override_Power_On_Back";
+set PGCB_DEBUG_OVR[32:1] = 'b01010101010101010101010101010101;
+flush;
+pass itpp "vector: TMS(0), 35;";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.fdfx_pgcb_bypass 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.fdfx_pgcb_ovr 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_isol_en_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_force_rst_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_ip_fet_en_b 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_sleep 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.fdfx_pgcb_bypass 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.fdfx_pgcb_ovr 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_isol_en_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_force_rst_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_ip_fet_en_b 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_sleep 0";
+
+label "Read_PGCB_Override_DFX_PARFUSE_STAP_Bypass_and_Override_Power_On_Back";
+compare PGCB_DEBUG_OVR_RO[32:1] = 'b01010101010101010101010101010101;
+compare PGCB_DEBUG_OVR[32:1] = 'b01010101010101010101010101010101;
+flush;
+
+focus_tap DFX_PARFUSE_STAP;
+label "Write_PGCB_Override_Clear_DFX_PARFUSE_STAP_Bypass_and_Override";
+set PGCB_DEBUG_OVR[32:1] = 'b00000000000000000000000000000000;
+flush;
+
+label "Read_PGCB_Override_Clear_DFX_PARFUSE_STAP_Bypass_and_Override";
+compare PGCB_DEBUG_OVR_RO[32:1] = 'b00000000000000000000000000000000;
+compare PGCB_DEBUG_OVR[32:1] = 'b00000000000000000000000000000000;
+flush;
+
+###############################################################################################;
+
+#########################PMC_HVM_STAP : PMCREGISTER3#######################;
+
+focus_tap PMC_HVM_STAP;
+label "Write_PGCB_Override_PMC_HVM_Bypass_and_Override_Power_On";
+set PMCREGISTER3[61] = 'b1;
+set PMCREGISTER3[103] = 'b1;
+set PMCREGISTER3[60] = 'b0;
+set PMCREGISTER3[102] = 'b0;
+flush;
+pass itpp "vector: TMS(0), 5;";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.fdfx_pgcb_bypass 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.fdfx_pgcb_ovr 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_isol_en_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_force_rst_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_ip_fet_en_b 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_sleep 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.fdfx_pgcb_bypass 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.fdfx_pgcb_ovr 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_isol_en_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_force_rst_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_ip_fet_en_b 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_sleep 0";
+
+label "Read_PGCB_Override_PMC_HVM_Bypass_and_Override_Power_On";
+compare PMCREGISTER3[61] = 'b1;
+compare PMCREGISTER3[103] = 'b1;
+compare PMCREGISTER3[60] = 'b0;
+compare PMCREGISTER3[102] = 'b0;
+flush;
+
+focus_tap PMC_HVM_STAP;
+label "Write_PGCB_Override_PMC_HVM_Bypass_and_Override_Power_Off";
+set PMCREGISTER3[61] = 'b1;
+set PMCREGISTER3[103] = 'b1;
+set PMCREGISTER3[60] = 'b1;
+set PMCREGISTER3[102] = 'b1;
+flush;
+pass itpp "vector: TMS(0), 5;";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.fdfx_pgcb_bypass 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.fdfx_pgcb_ovr 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_isol_en_b 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_force_rst_b 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_ip_fet_en_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_sleep 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.fdfx_pgcb_bypass 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.fdfx_pgcb_ovr 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_isol_en_b 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_force_rst_b 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_ip_fet_en_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_sleep 1";
+
+label "Read_PGCB_Override_PMC_HVM_Bypass_and_Override_Power_Off";
+compare PMCREGISTER3[61] = 'b1;
+compare PMCREGISTER3[103] = 'b1;
+compare PMCREGISTER3[60] = 'b1;
+compare PMCREGISTER3[102] = 'b1;
+flush;
+
+focus_tap PMC_HVM_STAP;
+label "Write_PGCB_Override_PMC_HVM_Bypass_and_Override_Power_On_Back";
+set PMCREGISTER3[61] = 'b1;
+set PMCREGISTER3[103] = 'b1;
+set PMCREGISTER3[60] = 'b0;
+set PMCREGISTER3[102] = 'b0;
+flush;
+pass itpp "vector: TMS(0), 35;";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.fdfx_pgcb_bypass 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.fdfx_pgcb_ovr 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_isol_en_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_force_rst_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_ip_fet_en_b 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_fuse_clock_power_cntrl.i_fuse_pgcb_cntrl.i_fuse_pgcbunit.pgcb_sleep 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.fdfx_pgcb_bypass 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.fdfx_pgcb_ovr 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_isol_en_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_force_rst_b 1";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_ip_fet_en_b 0";
+
+pass itpp "rem: peek_signal pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.w_drng.i_chassis_fuse_ctrl_south_complec_drng.drng_pwr_inst.drng_pgcbunit1.pgcb_sleep 0";
+
+label "Read_PGCB_Override_PMC_HVM_Bypass_and_Override_Power_On_Back";
+compare PMCREGISTER3[61] = 'b1;
+compare PMCREGISTER3[103] = 'b1;
+compare PMCREGISTER3[60] = 'b0;
+compare PMCREGISTER3[102] = 'b0;
+flush;
+
+focus_tap PMC_HVM_STAP;
+label "Write_PGCB_Override_Clear_PMC_HVM_Bypass_and_Override";
+set PMCREGISTER3[61] = 'b0;
+set PMCREGISTER3[103] = 'b0;
+set PMCREGISTER3[60] = 'b0;
+set PMCREGISTER3[102] = 'b0;
+flush;
+
+label "Read_PGCB_Override_Clear_PMC_HVM_Bypass_and_Override";
+compare PMCREGISTER3[61] = 'b0;
+compare PMCREGISTER3[103] = 'b0;
+compare PMCREGISTER3[60] = 'b0;
+compare PMCREGISTER3[102] = 'b0;
+flush;
+
+###############################################################################################;
+

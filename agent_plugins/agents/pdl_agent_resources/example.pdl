@@ -1,0 +1,522 @@
+iProcsForModule [get_single_name [get_current_design -icl]] 
+source $::env(DUVE_M_HOME)/verif/pdl/common/tap_utils.pdl
+
+iProc fuse_rtl_map {} {
+    iNote "FUSE_PDL: Set RTL path to macro"
+    #iSim macro_map dfx_secure_policy            pcd_tb.pcd.
+    iSim macro_map man_fuse_sip_rel_req          pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_chassis_fuse_controller_top.i_fuse_array_cntrl.i_fuse_array_cntrl_tap.man_fuse_sip_release_req
+    iSim macro_map fuse_sip_rel_ack              pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_chassis_fuse_controller_top.i_fuse_array_cntrl.i_fuse_array_cntrl_tap.fuse_sip_release_ack_sync
+}
+
+#############################
+######### FUSE SEQ ##########
+#############################
+iProc fuse_cltap_JTAGControl_DR_ro {} {
+    #[3] DEFER_SB 1'b0
+    #[2:1] CLOCK_MUX 'b00 - func clock
+	#[0] DIS_DCG 1'b0	
+    iNote "FUSE_PDL: CLOCK_MUX Switching to RO with JTAG_CONTROL register" 
+    set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_JTAGControl_DR]]
+    foreach_in_collection reg $fuse_reg {
+        set reg_name     [get_single_name $reg]
+        iWrite $reg_name.DIS_DCG 0x0
+        iWrite $reg_name.DEFER_SB 0x0
+        iWrite $reg_name.CLOCK_MUX 0x0 
+        iApply
+    }
+}
+
+iProc fuse_cltap_JTAGControl_DR_tck_wr {{DIS_DCG} {DEFER_SB} {CLOCK_MUX}} {
+    #[3] DEFER_SB 1'b0
+    #[2:1] CLOCK_MUX 'b00 - func clock
+	#[0] DIS_DCG 1'b0	
+	iNote "FUSE_PDL: CLOCK_MUX Switching to tck with JTAG_CONTROL register"
+    set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_JTAGControl_DR]]
+    foreach_in_collection reg $fuse_reg {
+        set reg_name     [get_single_name $reg]
+        iWrite $reg_name.DIS_DCG	$DIS_DCG 
+        iWrite $reg_name.DEFER_SB 	$DEFER_SB
+        iWrite $reg_name.CLOCK_MUX 	$CLOCK_MUX 
+        iApply
+    }
+
+    # delay for clock switching to complete
+    iRunLoop 1000 -tck
+}
+
+iProc fuse_cltap_JTAGStatus_DR_tck_rd {} {
+    #[3] DEFER_SB 1'b0
+    #[2:1] CLOCK_MUX 'b00 - func clock
+	#[0] DIS_DCG 1'b0	
+    iNote "FUSE_PDL: Read back JTAG_CLKMUX_TCK_STATUS" 
+    set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_JTAGStatus_DR]]
+    foreach_in_collection reg $fuse_reg {
+        set reg_name     [get_single_name $reg]
+        iRead $reg_name.CLKMUXSTATE     0b10 
+        iApply
+    }
+}
+
+iProc fuse_exit_standby_state {} {
+	iNote "FUSE_PDL : SB_DEFER_TCK"
+	#fuse_cltap_JTAGControl_DR_tck_wr {{DIS_DCG} {DEFER_SB} {CLOCK_MUX}}
+	iCall fuse_cltap_JTAGControl_DR_tck_wr 0b1 0b1 0b10
+
+	iNote "FUSE_PDL : CHECK_CLKMUX_TCK_STATUS"
+	iCall fuse_cltap_JTAGStatus_DR_tck_rd
+}
+
+iProc fuse_enter_standby_state {} {
+	iNote "FUSE_PDL : SB_ENABLE_RO"
+	#fuse_cltap_JTAGControl_DR_tck_wr {{DIS_DCG} {DEFER_SB} {CLOCK_MUX}}
+	iCall fuse_cltap_JTAGControl_DR_tck_wr 0b0 0b0 0b00
+}
+
+iProc fuse_intel_deb_status_reg_0_read {} {
+	iNote "FUSE_PDL : READING_INTEL_DEB_STATUS_REG_0"
+	#fuse_cltap_IndirectAccess1_DR_WR {{BAR} {DATA_WR} {ADDR} {RW_SEL}}
+	iCall fuse_cltap_IndirectAccess1_DR_WR 0x4 0x00000000 0x0080 0b0
+    iRunLoop 5 -tck
+	iNote "FUSE_PDL : CHECKING_INTEL_DEB_STATUS_REG_0_STATUS"
+	#fuse_cltap_IndirectAccess2_DR_RD {{STATUS} {DATA_RD}}
+	iCall fuse_cltap_IndirectAccess2_DR_RD 0b01 0bXXXXXXXXXXXXXXXX00000000XXXX1000
+}
+
+iProc fuse_cltap_IndirectAccess1_DR_fw_pg_on {} {
+    iNote "FUSE_PDL:  Setting Fire_wall and Power_gate" 
+    set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_IndirectAccess1_DR]]
+    foreach_in_collection reg $fuse_reg {
+        set reg_name     [get_single_name $reg]
+		iWrite $reg_name.BAR_SEL 	0x4
+		iWrite $reg_name.BYTE_EN 	0xF
+		iWrite $reg_name.WR_DATA 	0x00000007
+		iWrite $reg_name.ADDR 	0x0004
+		iWrite $reg_name.RW_SEL 	0b1
+        iApply
+    }
+
+    # delay 
+    iRunLoop 5 -tck
+}
+
+iProc fuse_cltap_IndirectAccess1_DR_fw_pg_on {} {
+    iNote "FUSE_PDL:  Setting Fire_wall and Power_gate" 
+    set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_IndirectAccess1_DR]]
+    iWrite $fuse_reg.BAR_SEL 	0x4
+    iWrite $fuse_reg.BYTE_EN 	0xF
+    iWrite $fuse_reg.WR_DATA 	0x00000007
+    iWrite $fuse_reg.ADDR 	0x0004
+    iWrite $fuse_reg.RW_SEL 	0b1
+    iApply
+    
+    # delay 
+    iRunLoop 5 -tck
+}
+
+iProc fuse_cltap_IndirectAccess2_DR_wr_sts_chk {} {
+    iNote "FUSE_PDL: Read back for FIREWALL_POWERGATE_STATUS" 
+    set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_IndirectAccess2_DR]]
+    foreach_in_collection reg $fuse_reg {
+        set reg_name     [get_single_name $reg]
+        iRead $reg_name.STATUS	0x10 
+        iApply
+    }
+}
+
+iProc fuse_cltap_IndirectAccess1_DR_fw_pg_off {} {
+    iNote "FUSE_PDL:  Setting Fire_wall and Power_gate" 
+    set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_IndirectAccess1_DR]]
+    foreach_in_collection reg $fuse_reg {
+        set reg_name     [get_single_name $reg]
+		iWrite $reg_name.BAR_SEL 	0x4
+		iWrite $reg_name.BYTE_EN 	0xF
+		iWrite $reg_name.WR_DATA 	0x00000001
+		iWrite $reg_name.ADDR 	0x0004
+		iWrite $reg_name.RW_SEL 	0b1
+        iApply
+    }
+
+    # delay 
+    iRunLoop 5 -tck
+
+}
+
+iProc fuse_cltap_IndirectAccess1_DR_WR {{BAR} {DATA_WR} {ADDR} {RW_SEL}} {
+    iNote "FUSE_PDL:  Setting INTEL_DEBUG_STATUS_REG0_RD" 
+    set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_IndirectAccess1_DR]]
+    foreach_in_collection reg $fuse_reg {
+        set reg_name     [get_single_name $reg]
+		iWrite $reg_name.BAR_SEL 	$BAR	
+		iWrite $reg_name.BYTE_EN 	0xF
+		iWrite $reg_name.WR_DATA 	$DATA_WR
+		iWrite $reg_name.ADDR 		$ADDR
+		iWrite $reg_name.RW_SEL 	$RW_SEL
+        iApply
+    }
+
+    # delay 
+    iRunLoop 5 -tck
+}
+
+iProc fuse_cltap_IndirectAccess2_DR_RD {{STATUS} {DATA_RD}} {
+    iNote "FUSE_PDL: Read back for FIREWALL_POWERGATE_STATUS" 
+    set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_IndirectAccess2_DR]]
+    foreach_in_collection reg $fuse_reg {
+        set reg_name     [get_single_name $reg]
+        iRead $reg_name.STATUS	 	$STATUS
+        iRead $reg_name.RD_DATA		$DATA_RD 
+        iApply
+    }
+    # delay 
+    iRunLoop 5 -tck
+}
+
+iProc fuse_cltap_IndirectAccess1_DR_IDS_REG_RD {} {
+    iNote "FUSE_PDL:  Setting INTEL_DEBUG_STATUS_REG0_RD" 
+    set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_IndirectAccess1_DR]]
+    foreach_in_collection reg $fuse_reg {
+        set reg_name     [get_single_name $reg]
+		iWrite $reg_name.BAR_SEL 	0x4
+		iWrite $reg_name.BYTE_EN 	0xF
+		iWrite $reg_name.WR_DATA 	0x00000000
+		iWrite $reg_name.ADDR 	0x0080
+		iWrite $reg_name.RW_SEL 	0b0
+        iApply
+    }
+
+    # delay 
+    iRunLoop 5 -tck
+}
+
+iProc fuse_cltap_IndirectAccess2_DR_IDS_REG_RD {} {
+    iNote "FUSE_PDL: Read back for FIREWALL_POWERGATE_STATUS" 
+    set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_IndirectAccess2_DR]]
+    foreach_in_collection reg $fuse_reg {
+        set reg_name     [get_single_name $reg]
+        iRead $reg_name.STATUS	0x01 
+        iRead $reg_name.RD_DATA	0xXXXXXXXXXXXXXXXX00000000XXXX1000 
+        iApply
+    }
+}
+
+iProc fuse_cltap_JTAGDebugManualFuseHIPCtrl2_DR_WR {{ADD} {FAVOR0} {FAVOR1} {ARRAY_FW} {ARRAY_PG} } {
+    iNote "FUSE_PDL:  Setting ARRAY_PG_FW_0_ADD_FAVOR" 
+    set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_JTAGDebugManualFuseHIPCtrl2_DR]]
+    foreach_in_collection reg $fuse_reg {
+        set reg_name     [get_single_name $reg]
+		iWrite $reg_name.ADDRESS 	$ADD
+		iWrite $reg_name.FAVOR0 	$FAVOR0
+		iWrite $reg_name.FAVOR1 	$FAVOR1
+		iWrite $reg_name.ARRAY_FW 	$ARRAY_FW
+		iWrite $reg_name.ARRAY_PG 	$ARRAY_PG
+		iWrite $reg_name.RDNT_SEL 	0b00000
+        iApply
+    }
+
+    # delay 
+    iRunLoop 5 -tck
+}
+
+iProc fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_WR {{EN} {SENSE} {PGMEN} {HV} {REL_REQ} {REL_ACK}} {
+    iNote "FUSE_PDL:  Setting MANUAL_ON_HV_PROTECT" 
+    set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR]]
+    foreach_in_collection reg $fuse_reg {
+        set reg_name     [get_single_name $reg]
+		iWrite $reg_name.ENABLE 	$EN	
+		iWrite $reg_name.SENSE 		$SENSE
+		iWrite $reg_name.PGMEN 		$PGMEN
+		iWrite $reg_name.HVPROTECT 	$HV
+		iWrite $reg_name.REL_REQ 	$REL_REQ
+		iWrite $reg_name.REL_ACK 	$REL_ACK
+        iApply
+    }
+
+    # delay 
+    iRunLoop 5 -tck
+}
+
+iProc fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE {{EN} {SENSE} {PGMEN} {SENSE_HIZ} {SENSELVLB} {SENSELVL} {HV} {REL_REQ} {REL_ACK}} {
+    iNote "FUSE_PDL:  SETTING JTAGDebugManualFuseHIPCtrl1 for sense" 
+    set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR]]
+    foreach_in_collection reg $fuse_reg {
+        set reg_name     [get_single_name $reg]
+		iWrite $reg_name.ENABLE 	$EN	
+		iWrite $reg_name.SENSE 		$SENSE
+		iWrite $reg_name.PGMEN 		$PGMEN
+		iWrite $reg_name.SENSEHIZ 	$SENSE_HIZ
+		iWrite $reg_name.SENSELVLB 	$SENSELVLB
+		iWrite $reg_name.SENSELVL 	$SENSELVL
+		iWrite $reg_name.HVPROTECT 	$HV
+		iWrite $reg_name.REL_REQ 	$REL_REQ
+		iWrite $reg_name.REL_ACK 	$REL_ACK
+        iApply
+    }
+
+    # delay 
+    iRunLoop 5 -tck
+}
+
+iProc fuse_cltap_JTAGDebugManualFuseHIPCtrl3_DR_WR {{DATA_WR}} {
+    set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_JTAGDebugManualFuseHIPCtrl3_DR]]
+    foreach_in_collection reg $fuse_reg {
+        set reg_name     [get_single_name $reg]
+		iWrite $reg_name.DATA 			$DATA_WR	
+		iWrite $reg_name.COL_RED 		0b00
+		iWrite $reg_name.COL_SAC 		0b00
+		iWrite $reg_name.ROW_CANARY 	0b00
+        iApply
+    }
+    # delay 
+    iRunLoop 5 -tck
+}
+
+iProc fuse_cltap_JTAGDebugManualFuseHIPCtrl3_DR_RD {{DATA_WR}} {
+    set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_JTAGDebugManualFuseHIPCtrl3_DR]]
+    foreach_in_collection reg $fuse_reg {
+        set reg_name     [get_single_name $reg]
+		iRead $reg_name.DATA 			$DATA_WR	
+        iApply
+    }
+    # delay 
+    iRunLoop 5 -tck
+}
+
+iProc fuse_man_prog {} {
+	iCall fuse_rtl_map
+
+	iNote "FUSE_PDL : EXIT_STANDBY_STATE"
+	iCall fuse_exit_standby_state	
+
+	#reset_hip { {MANUAL} }
+	iCall reset_hip 0
+
+	iNote "FUSE_PDL : Checking INTEL_DEB_STATUS_REG_0 Status"
+	iCall fuse_intel_deb_status_reg_0_read
+
+	iNote "FUSE_PDL : SETTING_ARRAY_PG_FW_0_ADD_FAVOR"
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl2_DR_WR {{ADD} {FAVOR0} {FAVOR1} {ARRAY_FW} {ARRAY_PG}}
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl2_DR_WR 0x0002 0b111 0b111 0b0 0b0
+
+	iNote "FUSE_PDL : SETTING_MANUAL_ON_HVPROTECT"
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_WR {{EN} {SENSE} {PGMEN} {HV} {REL_REQ} {REL_ACK}}
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_WR 0b1 0b0 0b0 0b1 0b0 0b0
+
+	iNote "FUSE_PDL : SETTING_DATA_WRITE"
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl3_DR_WR {{DATA_WR}} 
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl3_DR_WR 0x55555555
+    iRunLoop 5 -tck
+
+	iCall set_fuse_kar
+	
+	iNote "FUSE_PDL : MANUAL_PROGRAM_START"
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl3_DR_WR {{DATA_WR}} 
+	#iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl3_DR_WR 0x55555555
+	iCall fuse_man_program_data 1 0x55555555
+
+	iCall clear_fuse_kar	
+
+	#reset_hip { {MANUAL} }
+	iCall reset_hip 1
+
+	iNote "FUSE_PDL : SENSELVL_1_SENSE_0"	
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE {{EN} {SENSE} {PGMEN} {SENSE_HIZ} {SENSELVLB} {SENSELVL} {HV} {REL_REQ} {REL_ACK}} 
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE 0b1 0b0 0b0 0b0 0b0 0b1 0b0 0b0 0b0
+	
+	iNote "FUSE_PDL : SETTING_ARRAY_PG_FW_0_ADD_FAVOR"
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl2_DR_WR {{ADD} {FAVOR0} {FAVOR1} {ARRAY_FW} {ARRAY_PG}}
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl2_DR_WR 0x0002 0b111 0b111 0b0 0b0
+
+	iNote "FUSE_PDL : SENSE_1"	
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE {{EN} {SENSE} {PGMEN} {SENSE_HIZ} {SENSELVLB} {SENSELVL} {HV} {REL_REQ} {REL_ACK}} 
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE 0b1 0b1 0b0 0b0 0b0 0b1 0b0 0b0 0b0
+
+    iRunLoop 40 -tck
+	iNote "FUSE_PDL : SENSE_0"	
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE {{EN} {SENSE} {PGMEN} {SENSE_HIZ} {SENSELVLB} {SENSELVL} {HV} {REL_REQ} {REL_ACK}} 
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE 0b1 0b0 0b0 0b0 0b0 0b1 0b0 0b0 0b0
+
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl3_DR_RD {{DATA_WR}}
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl3_DR_RD 0x55555555
+
+	iNote "FUSE_PDL : SETTING_ARRAY_PG_FW_1"
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl2_DR_WR {{ADD} {FAVOR0} {FAVOR1} {ARRAY_FW} {ARRAY_PG}}
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl2_DR_WR 0x0002 0b111 0b111 0b1 0b1
+	
+	iNote "FUSE_PDL : SETTING_MANUAL_OFF_HVPROTECT_0"
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE {{EN} {SENSE} {PGMEN} {SENSE_HIZ} {SENSELVLB} {SENSELVL} {HV} {REL_REQ} {REL_ACK}} 
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE 0b0 0b0 0b0 0b0 0b0 0b0 0b0 0b0 0b0
+
+	iNote "FUSE_PDL : ENTER_STANDBY_STATE"
+	iCall fuse_enter_standby_state	
+}
+
+iProc reset_hip { {MANUAL} } {
+
+	if {$MANUAL == 0} {
+		iNote "FUSE_PDL : RESET_HIP (BAR4 INTEL_GLOBAL_CONTROL_REG)"
+		iNote "FUSE_PDL : SETTING_FIREWALL_POWERGATE"
+		#fuse_cltap_IndirectAccess1_DR_WR {{BAR} {DATA_WR} {ADDR} {RW_SEL}}
+		iCall fuse_cltap_IndirectAccess1_DR_WR 0x4 0x00000007 0x0004 0b1
+
+		iNote "FUSE_PDL : CHECKING_FIREWALL_POWERGATE_STATUS"
+		#fuse_cltap_IndirectAccess2_DR_RD {{STATUS} {DATA_RD}}
+		iCall fuse_cltap_IndirectAccess2_DR_RD 0b10 0xXXXXXXXX
+
+		iNote "FUSE_PDL : UNSET_FIREALL_POWERGATE"
+		#fuse_cltap_IndirectAccess1_DR_WR {{BAR} {DATA_WR} {ADDR} {RW_SEL}}
+		iCall fuse_cltap_IndirectAccess1_DR_WR 0x4 0x00000001 0x0004 0b1
+
+		iNote "FUSE_PDL : CHECKING_FIREWALL_POWERGATE_STATUS"
+		#fuse_cltap_IndirectAccess2_DR_RD {{STATUS} {DATA_RD}}
+		iCall fuse_cltap_IndirectAccess2_DR_RD 0b10 0xXXXXXXXX
+	} else {
+		iNote "FUSE_PDL : RESET_HIP (JTAG_REG)"
+		iNote "FUSE_PDL : RESET_HIP_1"
+		#fuse_cltap_JTAGDebugManualFuseHIPCtrl2_DR_WR {{ADD} {FAVOR0} {FAVOR1} {ARRAY_FW} {ARRAY_PG}}
+		iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl2_DR_WR 0x0000 0b111 0b111 0b1 0b1
+    	iRunLoop 5 -tck
+		iNote "FUSE_PDL : RESET_HIP_0"
+		#fuse_cltap_JTAGDebugManualFuseHIPCtrl2_DR_WR {{ADD} {FAVOR0} {FAVOR1} {ARRAY_FW} {ARRAY_PG}}
+		iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl2_DR_WR 0x0000 0b111 0b111 0b0 0b0
+    	iRunLoop 5 -tck
+
+	}
+}
+
+iProc set_fuse_kar {} {
+	iNote "FUSE_PDL : SETTING_KAR_VALUE"
+	#fuse_cltap_IndirectAccess1_DR_WR {{BAR} {DATA_WR} {ADDR} {RW_SEL}}
+	iCall fuse_cltap_IndirectAccess1_DR_WR 0x4 0b10110110001001110011011011111011 0x0008 0b1
+    iRunLoop 10 -tck
+	iNote "FUSE_PDL : CHECKING_KAR_REGISTER_STATUS"
+	#fuse_cltap_IndirectAccess2_DR_RD {{STATUS} {DATA_RD}}
+	iCall fuse_cltap_IndirectAccess2_DR_RD 0b10 0xXXXXXXXX
+}
+
+iProc clear_fuse_kar {} {
+	iNote "FUSE_PDL : CLEARING_KAR_VALUE"
+	#fuse_cltap_IndirectAccess1_DR_WR {{BAR} {DATA_WR} {ADDR} {RW_SEL}}
+	iCall fuse_cltap_IndirectAccess1_DR_WR 0x4 0b00000000000000000000000000000000 0x0008 0b1
+    iRunLoop 10 -tck
+	iNote "FUSE_PDL : CHECKING_KAR_REGISTER_STATUS"
+	#fuse_cltap_IndirectAccess2_DR_RD {{STATUS} {DATA_RD}}
+	iCall fuse_cltap_IndirectAccess2_DR_RD 0b10 0xXXXXXXXX
+}
+
+iProc fuse_man_program_data { {MODE} {DATA_WR} } {
+	if {$MODE == 0} {
+	    # If MODE is 0, call the function with the entire DATA_WR
+		#fuse_cltap_JTAGDebugManualFuseHIPCtrl3_DR_WR {{DATA_WR}} 
+	    iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl3_DR_WR $DATA_WR
+		iNote "FUSE_PDL : PGMEN_1"
+		#fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_WR {{EN} {SENSE} {PGMEN} {HV} {REL_REQ} {REL_ACK}}
+		iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_WR 0b1 0b0 0b1 0b1 0b0 0b0
+		iRunLoop 30000 -tck
+		iNote "FUSE_PDL : PGMEN_0"
+		iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_WR 0b1 0b0 0b0 0b1 0b0 0b0
+		iRunLoop 10 -tck
+		iNote "FUSE_PDL : PGMEN_0_SIP_REL_REQ_1"
+		iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_WR 0b1 0b0 0b0 0b1 0b1 0b0
+		iRunLoop 10 -tck
+		iSim poll_signal `man_fuse_sip_rel_req 0x1 10us 5ns	
+		iSim poll_signal `fuse_sip_rel_ack 0x1 1ms 5ns	
+		iNote "FUSE_PDL : PGMEN_0_SIP_REL_REQ_0"
+		iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_WR 0b1 0b0 0b0 0b1 0b0 0b0
+		iRunLoop 10 -tck
+		iSim poll_signal `man_fuse_sip_rel_req 0x1 10us 5ns	
+		iSim poll_signal `fuse_sip_rel_ack 0x1 10us 5ns	
+	} elseif {$MODE == 1} {
+	    # If MODE is 1, create a for loop to call the function bit by bit
+	    set data_length 32;  # Since DATA_WR is a 32-bit value
+	    for {set i 0} {$i < $data_length} {incr i} {
+	        set bit_data [expr {1 << $i}];
+	        if {[expr {$DATA_WR & $bit_data}]} {
+	            iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl3_DR_WR [format 0x%08X $bit_data]
+				iNote "FUSE_PDL : PGMEN_1"
+				#fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_WR {{EN} {SENSE} {PGMEN} {HV} {REL_REQ} {REL_ACK}}
+				iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_WR 0b1 0b0 0b1 0b1 0b0 0b0
+				iRunLoop 30000 -tck
+				iNote "FUSE_PDL : PGMEN_0"
+				iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_WR 0b1 0b0 0b0 0b1 0b0 0b0
+				iRunLoop 10 -tck
+				iNote "FUSE_PDL : PGMEN_0_SIP_REL_REQ_1"
+				iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_WR 0b1 0b0 0b0 0b1 0b1 0b0
+				iRunLoop 10 -tck
+				iSim poll_signal `man_fuse_sip_rel_req 0x1 10us 5ns	
+				iSim poll_signal `fuse_sip_rel_ack 0x1 1ms 5ns	
+				iNote "FUSE_PDL : PGMEN_0_SIP_REL_REQ_0"
+				iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_WR 0b1 0b0 0b0 0b1 0b0 0b0
+				iRunLoop 10 -tck
+				iSim poll_signal `man_fuse_sip_rel_req 0x1 10us 5ns	
+				iSim poll_signal `fuse_sip_rel_ack 0x1 10us 5ns	
+	        }
+	    }
+	} else {
+		puts "Invalid MODE value: $MODE"
+	}
+		 
+}
+
+iProc fuse_man_sense {} {
+	iCall fuse_rtl_map
+	
+	iNote "FUSE_PDL : EXIT_STANDBY_STATE"
+	iCall fuse_exit_standby_state	
+
+	#reset_hip { {MANUAL} }
+	iCall reset_hip 0
+
+	iNote "FUSE_PDL : Checking INTEL_DEB_STATUS_REG_0 Status"
+	iCall fuse_intel_deb_status_reg_0_read
+
+	#reset_hip { {MANUAL} }
+	iCall reset_hip 1
+
+	iNote "FUSE_PDL : SENSELVL_1_SENSE_0"	
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE {{EN} {SENSE} {PGMEN} {SENSE_HIZ} {SENSELVLB} {SENSELVL} {HV} {REL_REQ} {REL_ACK}} 
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE 0b1 0b0 0b0 0b0 0b0 0b1 0b0 0b0 0b0
+	
+	iNote "FUSE_PDL : SETTING_ARRAY_PG_FW_0_ADD_FAVOR"
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl2_DR_WR {{ADD} {FAVOR0} {FAVOR1} {ARRAY_FW} {ARRAY_PG}}
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl2_DR_WR 0x0002 0b111 0b111 0b0 0b0
+
+	iNote "FUSE_PDL : SENSE_1"	
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE {{EN} {SENSE} {PGMEN} {SENSE_HIZ} {SENSELVLB} {SENSELVL} {HV} {REL_REQ} {REL_ACK}} 
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE 0b1 0b1 0b0 0b0 0b0 0b1 0b0 0b0 0b0
+
+    iRunLoop 40 -tck
+	iNote "FUSE_PDL : SENSE_0"	
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE {{EN} {SENSE} {PGMEN} {SENSE_HIZ} {SENSELVLB} {SENSELVL} {HV} {REL_REQ} {REL_ACK}} 
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE 0b1 0b0 0b0 0b0 0b0 0b1 0b0 0b0 0b0
+
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl3_DR_RD {{DATA_WR}}
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl3_DR_RD 0x55555555
+
+	iNote "FUSE_PDL : SETTING_ARRAY_PG_FW_1"
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl2_DR_WR {{ADD} {FAVOR0} {FAVOR1} {ARRAY_FW} {ARRAY_PG}}
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl2_DR_WR 0x0002 0b111 0b111 0b1 0b1
+	
+	iNote "FUSE_PDL : SETTING_MANUAL_OFF_HVPROTECT_0"
+	#fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE {{EN} {SENSE} {PGMEN} {SENSE_HIZ} {SENSELVLB} {SENSELVL} {HV} {REL_REQ} {REL_ACK}} 
+	iCall fuse_cltap_JTAGDebugManualFuseHIPCtrl1_DR_SENSE 0b0 0b0 0b0 0b0 0b0 0b0 0b0 0b0 0b0
+
+	iNote "FUSE_PDL : ENTER_STANDBY_STATE"
+	iCall fuse_enter_standby_state	
+}
+
+iProc fuse_rom_resense {} {
+	iCall fuse_rtl_map
+	iNote "FUSE_PDL : EXIT_STANDBY_STATE"
+	iCall fuse_exit_standby_state	
+
+}
+
+iProc fuse_prog_setup_seq {} {
+    iNote "FUSE_PDL: Pre_setup for TCK clock"
+    iCall fuse_sb_defer_tck 
+ 
+	iNote "FUSE_PDL : Checking INTEL_DEB_STATUS_REG_0 Status"
+	iCall fuse_intel_deb_status_reg_0_read
+	
+}
+

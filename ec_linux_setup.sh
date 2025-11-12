@@ -363,6 +363,8 @@ EOF
 #  to launch ValBot TUI from anywhere.
 # ==============================================================================
 
+set -Eeuo pipefail
+
 # --- Colors ---
 if [[ -t 1 ]]; then
   BOLD='\e[1m'; RED='\e[31m'; GREEN='\e[32m'; YELLOW='\e[33m'; BLUE='\e[34m'; NC='\e[0m'
@@ -425,7 +427,7 @@ main() {
       {
         echo ""
         echo "# ValBot CLI alias added by valbot_tui_alias_setup.sh on $(date)"
-        echo "alias valbot=\"$bash_runner\""
+        echo "alias valbot \"$bash_runner\""
       } >> "$aliases_file"
       ok "Alias successfully added to $aliases_file"
       say "\n${BOLD}Setup Complete!${NC}"
@@ -442,7 +444,7 @@ main() {
     if confirm "Create $aliases_file and add the alias?"; then
       {
         echo "# ValBot CLI alias added by valbot_tui_alias_setup.sh on $(date)"
-        echo "alias valbot=\"$bash_runner\""
+        echo "alias valbot \"$bash_runner\""
       } > "$aliases_file"
       ok "Created $aliases_file and added alias"
       say "\n${BOLD}Setup Complete!${NC}"
@@ -455,8 +457,8 @@ main() {
     else
       warn "Alias setup cancelled."
       say "You can still create an alias manually in your shell configuration:"
-      say "  - Bash: echo 'alias valbot=\"$bash_runner\"' >> ~/.bashrc"
-      say "  - Zsh: echo 'alias valbot=\"$bash_runner\"' >> ~/.zshrc"
+      say "  - Bash: echo 'alias valbot \"$bash_runner\"' >> ~/.bashrc"
+      say "  - Zsh: echo 'alias valbot \"$bash_runner\"' >> ~/.zshrc"
       exit 0
     fi
   fi
@@ -470,7 +472,7 @@ EOFSCRIPT
 
   say "
 You can create an alias for convenience (add to your shell rc file):"
-  say "  - Bash/Zsh: alias valbot=\"$bash_runner\""
+  say "  - Bash/Zsh: alias valbot \"$bash_runner\""
   say "  - Or run: $alias_setup_script (to set up the alias automatically)"
 }
 
@@ -495,12 +497,12 @@ ${BOLD}Step 6:${NC} Optional: add an alias to run valbot-tui from anywhere."
     else
       warn "Skipping alias creation in $aliases_file."
       say "You can add it manually later with:"
-      say "  echo 'alias valbot=\"$bash_runner\"' >> $aliases_file"
+      say "  echo 'alias valbot \"$bash_runner\"' >> $aliases_file"
     fi
   else
     warn "No $aliases_file found."
     say "You can still create an alias manually in your shell configuration, for example:"
-    say "  - Bash/Zsh: echo 'alias valbot=\"$bash_runner\"' >> ~/.bashrc  # or ~/.zshrc"
+    say "  - Bash/Zsh: echo 'alias valbot \"$bash_runner\"' >> ~/.bashrc  # or ~/.zshrc"
   fi
 }
 

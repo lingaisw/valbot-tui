@@ -167,24 +167,15 @@ echo.
 echo REM Change to the script directory
 echo cd /d "%%SCRIPT_DIR%%"
 echo.
-echo REM Check for virtual environment in multiple locations
-echo set VENV_FOUND=0
-echo set VENV_PATH=
+echo REM Hardcoded virtual environment path from setup
+echo set VENV_PATH=%VENV_PATH%
 echo.
-echo for %%%%V in ^(venv valbot-venv .venv^) do ^(
-echo     if exist "%%%%V\Scripts\activate.bat" ^(
-echo         set "VENV_PATH=%%%%V"
-echo         set VENV_FOUND=1
-echo         goto :venv_found
-echo     ^)
-echo ^)
-echo.
-echo :venv_found
-echo if %%VENV_FOUND%%==1 ^(
+echo REM Activate virtual environment if it exists
+echo if exist "%%VENV_PATH%%\Scripts\activate.bat" ^(
 echo     echo Activating virtual environment at %%VENV_PATH%%...
 echo     call "%%VENV_PATH%%\Scripts\activate.bat"
 echo ^) else ^(
-echo     echo Warning: Virtual environment not found in common locations ^^^(venv, valbot-venv, .venv^^^)
+echo     echo Warning: Virtual environment not found at %%VENV_PATH%%
 echo     echo Running with system Python...
 echo ^)
 echo.

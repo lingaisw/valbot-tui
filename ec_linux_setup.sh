@@ -290,16 +290,16 @@ ${BOLD}Step 5:${NC} Create convenience launcher script."
   if [[ -f "$bash_runner" ]] && ! confirm "Overwrite existing $bash_runner?"; then
     warn "Skipping $bash_runner"
   else
-    cat > "$bash_runner" <<'EOF'
+    cat > "$bash_runner" <<EOF
 #!/bin/bash
 # ValBot TUI Launcher for Unix/Linux/macOS
 # This script launches the Terminal User Interface version of ValBot
 
 # Get the directory where this script is located
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 
 # Change to the script directory
-cd "$SCRIPT_DIR"
+cd "\$SCRIPT_DIR"
 
 # Check if Python is available
 if ! command -v python3 &> /dev/null; then
@@ -308,25 +308,15 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Check for virtual environment in multiple locations
-VENV_FOUND=0
-VENV_PATH=""
+# Hardcoded virtual environment path from setup
+VENV_PATH="$VENV_PATH"
 
-# Check common venv locations
-for VENV_DIR in "venv" "valbot-venv" ".venv"; do
-    if [ -f "$SCRIPT_DIR/$VENV_DIR/bin/activate" ]; then
-        VENV_PATH="$SCRIPT_DIR/$VENV_DIR"
-        VENV_FOUND=1
-        break
-    fi
-done
-
-# Activate virtual environment if found
-if [ $VENV_FOUND -eq 1 ]; then
-    echo "Activating virtual environment at $VENV_PATH..."
-    source "$VENV_PATH/bin/activate"
+# Activate virtual environment if it exists
+if [ -f "\$VENV_PATH/bin/activate" ]; then
+    echo "Activating virtual environment at \$VENV_PATH..."
+    source "\$VENV_PATH/bin/activate"
 else
-    echo "Warning: Virtual environment not found in common locations (venv, valbot-venv, .venv)"
+    echo "Warning: Virtual environment not found at \$VENV_PATH"
     echo "Running with system Python..."
 fi
 
@@ -335,15 +325,15 @@ fi
 echo "Starting ValBot TUI in new terminal..."
 xfce4-terminal --command="bash -c '
     # Re-activate virtual environment in the new terminal
-    if [ $VENV_FOUND -eq 1 ]; then
-        source \"$VENV_PATH/bin/activate\"
+    if [ -f \"\$VENV_PATH/bin/activate\" ]; then
+        source \"\$VENV_PATH/bin/activate\"
     fi
     
     # Launch the TUI
-    python3 \"$SCRIPT_DIR/valbot_tui_launcher.py\" $@
+    python3 \"\$SCRIPT_DIR/valbot_tui_launcher.py\" \$@
 '" &
 
-echo "ValBot TUI launched in new terminal window (PID: $!)"
+echo "ValBot TUI launched in new terminal window (PID: \$!)"
 EOF
     chmod +x "$bash_runner"
     ok "Wrote $bash_runner"

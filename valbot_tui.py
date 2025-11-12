@@ -73,7 +73,7 @@ This TUI implementation includes all major features from the CLI version:
    - Keyboard shortcuts
 
 ✅ Theme Persistence:
-   - Theme changes are automatically saved to ~/.valbot_tui_theme_config.json
+   - Theme changes are automatically saved to ~/.valbot_tui_config.json
    - Saved theme is loaded on startup
    - Use Ctrl+P (command palette) to change themes
    - Supports all Textual built-in themes plus custom ValBot theme
@@ -170,7 +170,7 @@ else:
 
 
 # Theme persistence configuration file path
-THEME_CONFIG_PATH = Path.home() / ".valbot_tui_theme_config.json"
+THEME_CONFIG_PATH = Path.home() / ".valbot_tui_config.json"
 
 
 def save_theme_config(theme_name: str) -> None:
@@ -1662,10 +1662,10 @@ class InlinePicker(OptionList):
     """Inline picker that temporarily replaces the textarea for selections."""
     
     BINDINGS = [
-        Binding("ctrl+a", "parent_agent_picker", "Agent", show=True, priority=True),
         Binding("ctrl+f", "parent_toggle_files", "Files", show=True, priority=True),
+        Binding("ctrl+b", "parent_agent_picker", "Agent", show=True, priority=True),
         Binding("ctrl+n", "parent_new_chat", "New Chat", show=True, priority=True),
-        Binding("ctrl+m", "parent_change_model", "Model", show=True, priority=True),
+        Binding("ctrl+o", "parent_change_model", "Model", show=True, priority=True),
         Binding("ctrl+s", "parent_save_session", "Save", show=True, priority=True),
         Binding("escape", "cancel_picker", "Cancel", show=True, priority=True),
         Binding("ctrl+q", "parent_quit", "Quit", show=True, priority=True),
@@ -1773,17 +1773,6 @@ class InlinePicker(OptionList):
         selected_idx = event.option_index
         selected_value = self._value_map.get(selected_idx, event.option.id)
         self.post_message(InlinePickerSelected(self, selected_value))
-    
-    def action_cancel_picker(self) -> None:
-        """Cancel the picker."""
-        # Post a message with None value to indicate cancellation
-        self.post_message(InlinePickerSelected(self, None))
-        # Also try to call the parent screen's cancel action as fallback
-        try:
-            if hasattr(self.screen, 'action_cancel'):
-                self.screen.action_cancel()
-        except Exception:
-            pass
     
     # Delegate parent actions to the main screen
     async def action_parent_agent_picker(self) -> None:
@@ -1952,10 +1941,10 @@ class MainScreen(Screen):
     """Main application screen with modern Material Design layout."""
     
     BINDINGS = [
-        Binding("ctrl+a", "agent_picker", "Agent", priority=True),
         Binding("ctrl+f", "toggle_files", "Files", priority=True),
+        Binding("ctrl+b", "agent_picker", "Agent", priority=True),
         Binding("ctrl+n", "new_chat", "New Chat", priority=True),
-        Binding("ctrl+m", "change_model", "Model", priority=True),
+        Binding("ctrl+o", "change_model", "Model", priority=True),
         Binding("ctrl+s", "save_session", "Save", priority=True),
         Binding("escape", "cancel", "Cancel", priority=True),
         Binding("ctrl+q", "quit", "Quit", priority=True),
@@ -2674,15 +2663,42 @@ Please check your configuration and try again.
                     callback(selected_value)
     
     def action_cancel(self):
-        """Cancel current operation (e.g., close inline picker, cancel command/agent prompts)."""
-        # Cancel any ongoing streaming
+        """Cancel current operation (e.g., close inline picker, file panel, cancel command/agent prompts)."""
+        # Priority 1: Check if inline picker or file explorer panel is visible - close both if open
+        picker_closed = False
+        file_panel_closed = False
+        
+        # Priority 1: Close agent & file panels if open
+        try:
+            picker = self.query_one("#inline-picker", InlinePicker)
+            self.hide_inline_picker()
+            # Clear any pending callback
+            if hasattr(self, '_picker_callback'):
+                self._picker_callback = None
+            picker_closed = True
+        except Exception:
+            pass
+        
+        if self.show_files:
+            file_panel = self.query_one("#file-panel", FileExplorerPanel)
+            file_panel.remove_class("visible")
+            self.show_files = False
+            file_panel_closed = True
+        
+        # If we closed any UI elements, return focus to command input and don't cancel AI
+        if picker_closed or file_panel_closed:
+            command_input = self.query_one("#command-input", CommandInput)
+            command_input.focus()
+            return
+        
+        # Priority 2: Cancel any ongoing streaming (only if no UI elements are open)
         if self._cancel_streaming == False:  # Only set flag and notify if not already cancelled
             self._cancel_streaming = True
             # Check if we're actually streaming
             if self.processing:
                 self.app.notify(f"{EMOJI['cross']} Response cancelled.", severity="warning", timeout=2)
         
-        # Cancel any ongoing agent execution
+        # Priority 4: Cancel any ongoing agent execution
         if hasattr(self, '_agent_input_state') and self._agent_input_state:
             # Check if agent is actively running (not just waiting for input)
             if self._agent_input_state.get('waiting_for_input', False):
@@ -2697,7 +2713,7 @@ Please check your configuration and try again.
                 # Don't show message here - the agent thread will show it
                 return
         
-        # Check if we're waiting for command input
+        # Priority 5: Check if we're waiting for command input
         if hasattr(self, '_command_input_state') and self._command_input_state.get('waiting_for_input', False):
             self._command_input_state['result'] = None
             self._command_input_state['waiting_for_input'] = False
@@ -2705,16 +2721,6 @@ Please check your configuration and try again.
             chat_panel = self.query_one("#chat-panel", ChatPanel)
             chat_panel.add_message("system", f"{EMOJI['cross']} Command cancelled.")
             return
-        
-        # Check if inline picker is visible
-        try:
-            picker = self.query_one("#inline-picker", InlinePicker)
-            self.hide_inline_picker()
-            # Clear any pending callback
-            if hasattr(self, '_picker_callback'):
-                self._picker_callback = None
-        except Exception:
-            pass
     
     @on(TextAreaSubmitted)
     async def handle_input(self, event: TextAreaSubmitted) -> None:
@@ -3021,14 +3027,14 @@ Error executing command `{cmd}`:
 
 | Shortcut | Action | Description |
 |----------|--------|-------------|
-| **Ctrl+A** | Agent | Select and run an agent workflow |
-| **Ctrl+F** | Files | Toggle file explorer panel |
-| **Ctrl+N** | New Chat | Clear conversation and start fresh |
-| **Ctrl+M** | Model | Open model picker dialog |
-| **Ctrl+S** | Save | Save session (coming soon) |
-| **Ctrl+L** | Load | Load session (coming soon) |
-| **Escape** | Cancel | Cancel current operation/close dialogs |
-| **Ctrl+Q** | Quit | Exit the application |
+| **ctrl+f** | Files | Toggle file explorer panel |
+| **ctrl+b** | Agent | Select and run an agent workflow |
+| **ctrl+n** | New Chat | Clear conversation and start fresh |
+| **ctrl+o** | Model | Open model picker dialog |
+| **ctrl+s** | Save | Save session (coming soon) |
+| **ctrl+l** | Load | Load session (coming soon) |
+| **escape** | Cancel | Cancel current operation/close dialogs |
+| **ctrl+q** | Quit | Exit the application |
 
 ## 💬 Chat Features
 
@@ -3094,7 +3100,7 @@ Agents are powerful workflows that can perform complex tasks:
 - **Project** - Make project-wide changes and add features
 
 **Using Agents:**
-1. Type `/agent` or press Ctrl+M
+1. Type `/agent` or press ctrl+o
 2. Use ↑/↓ arrow keys to select
 3. Press Enter to run
 4. Follow the agent's prompts

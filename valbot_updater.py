@@ -200,7 +200,8 @@ class ValbotUpdater:
                             self.console.print(f"[yellow]Discarding changes for {len(files_to_discard)} file(s)...[/yellow]")
                             try:
                                 for file_path in files_to_discard:
-                                    subprocess.check_output(["git", "checkout", "HEAD", "--", file_path], cwd=app_directory, stderr=subprocess.STDOUT)
+                                    # Checkout from origin to get the repository version, not local HEAD
+                                    subprocess.check_output(["git", "checkout", f"origin/{current_branch}", "--", file_path], cwd=app_directory, stderr=subprocess.STDOUT)
                                 self.console.print("[green]Selected files reverted to repository version.[/green]")
                             except subprocess.CalledProcessError as e:
                                 error_msg = e.output.decode('utf-8') if e.output else str(e)

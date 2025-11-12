@@ -9,7 +9,7 @@
   },
   "agent_model_config": {
     "default_endpoint": "valbot-proxy",
-    "default_model": "gpt-4.1",
+    "default_model": "gpt-5",
     "small_model": "gpt-5-mini"
   },
   "chat_model_config": {
@@ -20,6 +20,11 @@
     "reasoning_effort": "low"
   },
   "default_agents":[
+      { 
+      "name": "Database Agent",
+      "description": "Create/Load your own RAG database of documents to chat with",
+      "location": "./agent_plugins/agents/database_agent.py"
+    },
     { 
       "name": "PDL Expert",
       "description": "Q&A with PDL Expert",

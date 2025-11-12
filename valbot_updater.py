@@ -237,7 +237,7 @@ class ValbotUpdater:
             ).decode('utf-8')
             self.console.print("[bold green]ValBot repository updated successfully![/bold green]")
             if pull_output.strip() and not "Already up to date" in pull_output:
-                self.console.print(f"[dim]{pull_output}[/dim]")
+                self.console.print(f"{pull_output}")
         except subprocess.CalledProcessError as e:
             error_msg = e.output.decode('utf-8') if e.output else str(e)
             

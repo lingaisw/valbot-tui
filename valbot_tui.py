@@ -1667,7 +1667,6 @@ class InlinePicker(OptionList):
         Binding("ctrl+n", "parent_new_chat", "New Chat", show=True, priority=True),
         Binding("ctrl+m", "parent_change_model", "Model", show=True, priority=True),
         Binding("ctrl+s", "parent_save_session", "Save", show=True, priority=True),
-        Binding("ctrl+l", "parent_load_session", "Load", show=True, priority=True),
         Binding("escape", "cancel_picker", "Cancel", show=True, priority=True),
         Binding("ctrl+q", "parent_quit", "Quit", show=True, priority=True),
     ]
@@ -1811,11 +1810,6 @@ class InlinePicker(OptionList):
         """Delegate to parent screen's save session action."""
         if hasattr(self.screen, 'action_save_session'):
             self.screen.action_save_session()
-    
-    def action_parent_load_session(self) -> None:
-        """Delegate to parent screen's load session action."""
-        if hasattr(self.screen, 'action_load_session'):
-            self.screen.action_load_session()
     
     def action_parent_quit(self) -> None:
         """Delegate to parent app's quit action."""

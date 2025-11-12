@@ -363,8 +363,6 @@ EOF
 #  to launch ValBot TUI from anywhere.
 # ==============================================================================
 
-set -Eeuo pipefail
-
 # --- Colors ---
 if [[ -t 1 ]]; then
   BOLD='\e[1m'; RED='\e[31m'; GREEN='\e[32m'; YELLOW='\e[33m'; BLUE='\e[34m'; NC='\e[0m'

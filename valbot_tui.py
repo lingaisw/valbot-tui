@@ -2813,7 +2813,7 @@ Please check your configuration and try again.
         
         elif cmd == "/reload":
             # Handle /reload BEFORE CommandManager to avoid blocking Confirm.ask()
-            chat_panel.add_message("system", """## 🔄 Reload Configuration
+            chat_panel.add_message("system", """## ↻ Reload Configuration
 
 Restarting TUI to reload configuration...
 """)

@@ -426,7 +426,6 @@ main() {
     if confirm "Add alias 'valbot' to $aliases_file?"; then
       {
         echo ""
-        echo "# ValBot CLI alias added by valbot_tui_alias_setup.sh on $(date)"
         echo "alias valbot \"$bash_runner\""
       } >> "$aliases_file"
       ok "Alias successfully added to $aliases_file"
@@ -443,7 +442,6 @@ main() {
     warn "No $aliases_file found."
     if confirm "Create $aliases_file and add the alias?"; then
       {
-        echo "# ValBot CLI alias added by valbot_tui_alias_setup.sh on $(date)"
         echo "alias valbot \"$bash_runner\""
       } > "$aliases_file"
       ok "Created $aliases_file and added alias"
@@ -489,7 +487,6 @@ ${BOLD}Step 6:${NC} Optional: add an alias to run valbot-tui from anywhere."
       fi
       {
         echo ""
-        echo "# ValBot CLI alias added by ec_linux_setup.sh on $(date)"
         echo "alias valbot \"$bash_runner\""
       } >> "$aliases_file"
       ok "Alias added to $aliases_file"

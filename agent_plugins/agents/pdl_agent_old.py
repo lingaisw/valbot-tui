@@ -1,3 +1,4 @@
+
 from agent_plugins.common_agent_imports import *
 from agent_plugins.agent_plugin import AgentPlugin
 import asyncio
@@ -6,17 +7,6 @@ import json
 import re
 from pathlib import Path
 from typing import List, Dict, Union, Optional, Any
-import PyPDF2
-import os
-import json
-from pathlib import Path
-from typing import List, Dict, Optional, Any, Tuple
-import hashlib
-import pickle
-from sentence_transformers import SentenceTransformer
-import chromadb
-from chromadb.config import Settings
-from docx import Document
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from rich.prompt import Confirm
 from rich import box
@@ -43,12 +33,11 @@ class MyCustomPlugin(AgentPlugin):
         the test is trying to accomplish rather than doing direct syntax translation.
     
     STAGE 2 - GENERATE: 
-        Using the understanding from Stage 1 and relevant PDL syntax knowledge from 
-        Tessent manuals (via RAG), generate proper PDL code that accomplishes the 
-        same test objectives using correct PDL constructs and idioms.
+        Using the understanding from Stage 1, generate proper PDL code that accomplishes 
+        the same test objectives using correct PDL constructs and idioms.
     
     This approach avoids inconsistent direct translation and ensures the generated 
-    PDL uses appropriate commands and syntax from the Tessent documentation.
+    PDL uses appropriate commands and syntax.
     """
     
     REQUIRED_ARGS = {}
@@ -115,6 +104,8 @@ class MyCustomPlugin(AgentPlugin):
                 mode_value = console.input("[bold yellow]Select an option (1 or 2):[/bold yellow] ").strip()
                 if mode_value not in ['1', '2']:
                     console.print("[red]Invalid selection. Please enter 1 or 2.[/red]")
+                    Prompt.ask("retry?")
+
             
             selected_index = int(mode_value) - 1
         
@@ -137,49 +128,6 @@ class MyCustomPlugin(AgentPlugin):
         # Initialize Rich console for beautiful formatting
         self.console = Console()
         
-        # Initialize RAG Knowledge Base
-        agent_dir = Path(__file__).parent
-        self.agent_dir = agent_dir  # Store for later reference
-        
-        try:
-            self.rag_kb = RAGKnowledgeBase(
-                pdf_dir=agent_dir,
-                chunk_size=1000,
-                chunk_overlap=200,
-                collection_name="tessent_pdl_knowledge"
-            )
-            
-            # Load PDF manuals into RAG system (will use cache if available)
-            pdf_files = [
-                "tessent_shell_reference_manual.pdf",
-                "tessent_cell_library_manual.pdf",
-                "DTEG_ITPP_Reader_Commands.pdf"
-            ]
-            self.rag_kb.load_pdfs(pdf_files, force_reload=False)
-            
-            # Load SPF documentation files (.docx)
-            spf_doc_files = [
-                "Pattern_Framework_Spec_Template.docx",
-                "Pattern_Framework_Spec_Test.docx",
-                "SPF_CPP_API_Reference.docx"
-            ]
-            self.rag_kb.load_docx_files(spf_doc_files, force_reload=False)
-            
-            # Also load example.pdl as a text document into RAG
-            example_pdl_path = agent_dir / "example.pdl"
-            if example_pdl_path.exists():
-                self.rag_kb.load_text_file(example_pdl_path, source_name="example.pdl")
-                self.console.print(f"[green]✓ example.pdl loaded into RAG KB[/green]")
-            
-            # Display stats
-            stats = self.rag_kb.get_stats()
-            self.console.print(f"[green]✓ RAG KB ready: {stats['total_chunks']} chunks available[/green]")
-            
-        except Exception as e:
-            self.console.print(f"[yellow]⚠ RAG initialization failed: {e}[/yellow]")
-            self.console.print("[yellow]Falling back to legacy knowledge base loading...[/yellow]")
-            self.rag_kb = None
-        
         # Create specialized agents for two-stage conversion
         self.understanding_agent = self.create_understanding_agent(model)
         self.pdl_generation_agent = self.create_pdl_generation_agent(model)
@@ -189,64 +137,6 @@ class MyCustomPlugin(AgentPlugin):
         self.pdl_expert_agent = self.create_pdl_expert_agent(model)
         # Provide tools for agent to use autonomously
         self.add_agentic_tools()
-
-    def get_relevant_knowledge(self, query: str, top_k: int = 5) -> str:
-        """
-        Retrieve relevant knowledge from RAG system based on query.
-        Falls back to full text if RAG is unavailable.
-        
-        Args:
-            query: Search query for relevant context
-            top_k: Number of relevant chunks to retrieve
-            
-        Returns:
-            Relevant knowledge context
-        """
-        if self.rag_kb:
-            # Use RAG for semantic search
-            context = self.rag_kb.get_context_for_query(
-                query=query,
-                top_k=top_k,
-                include_metadata=True
-            )
-            return context
-        else:
-            # Fallback: load full PDF text (legacy method)
-            return self._load_legacy_knowledge_base()
-    
-    def _load_legacy_knowledge_base(self) -> str:
-        """
-        Legacy method: Load and extract full text from PDFs.
-        Used as fallback if RAG system is unavailable.
-        """
-        knowledge = []
-        agent_dir = Path(__file__).parent
-        
-        pdf_files = [
-            "tessent_shell_reference_manual.pdf",
-            "tessent_cell_library_manual.pdf",
-            "DTEG_ITPP_Reader_Commands.pdf"
-        ]
-        
-        self.console.print("[bold yellow]Loading knowledge base (legacy mode)...[/bold yellow]")
-        
-        for pdf_file in pdf_files:
-            pdf_path = agent_dir / pdf_file
-            if pdf_path.exists():
-                try:
-                    with open(pdf_path, 'rb') as file:
-                        pdf_reader = PyPDF2.PdfReader(file)
-                        text = ""
-                        num_pages = len(pdf_reader.pages)
-                        for page_num in range(num_pages):
-                            page = pdf_reader.pages[page_num]
-                            text += page.extract_text()
-                        knowledge.append(f"=== {pdf_file} ===\n{text[:50000]}")
-                        self.console.print(f"  [green]✓[/green] Loaded {pdf_file} ({num_pages} pages)")
-                except Exception as e:
-                    self.console.print(f"  [red]✗[/red] Error loading {pdf_file}: {e}")
-        
-        return "\n\n".join(knowledge) if knowledge else "No knowledge base available."
 
     def create_agent(self, model):
         """Create the SPF to PDL conversion agent with specialized system prompt."""
@@ -264,7 +154,6 @@ class MyCustomPlugin(AgentPlugin):
         return Agent(
             model=model,
             system_prompt=system_prompt,
-            result_type=str,
             retries=3
         )
     
@@ -326,7 +215,6 @@ class MyCustomPlugin(AgentPlugin):
         return Agent(
             model=model,
             system_prompt=system_prompt,
-            result_type=str,
             retries=2
         )
     
@@ -433,7 +321,6 @@ class MyCustomPlugin(AgentPlugin):
         return Agent(
             model=model,
             system_prompt=system_prompt,
-            result_type=str,
             retries=3
         )
     
@@ -517,7 +404,6 @@ class MyCustomPlugin(AgentPlugin):
         return Agent(
             model=model,
             system_prompt=system_prompt,
-            result_type=str,
             retries=2
         )
     
@@ -672,12 +558,11 @@ class MyCustomPlugin(AgentPlugin):
             # ====================================================================
             self.console.print(f"  [cyan]Stage 2:[/cyan] Generating PDL from understanding...")
             
-            # Extract key information to query RAG
-            # Create a better search query based on the operations found
+            # Create a search query based on the operations found
             search_terms = []
             content_lower = spf_data['content'].lower()
             
-            # Identify key operations to search for in PDL manual
+            # Identify key operations
             if 'scan' in content_lower:
                 search_terms.append('scan')
             if 'vector' in content_lower or 'pattern' in content_lower:
@@ -694,103 +579,84 @@ class MyCustomPlugin(AgentPlugin):
             # Always search for core PDL syntax
             search_terms.append('iProc iWrite iRead iApply iCall iRunLoop iNote')
             
-            # Build RAG query - PRIORITIZE iSim commands
-            rag_query = f"iSim poll_signal peek_signal macro_map DTEG simulation commands {' '.join(search_terms)} PDL syntax examples"
-            
-            # Retrieve relevant PDL knowledge (example.pdl is now in RAG)
-            self.console.print(f"  [dim]Retrieving PDL syntax examples from knowledge base...[/dim]")
-            relevant_pdl_knowledge = self.get_relevant_knowledge(rag_query, top_k=12)
-            
-            # Generate PDL based on understanding and knowledge
+            # Generate PDL based on understanding
             pdl_generation_prompt = f"""
             Write PDL code to implement the following test operations.
             
             TEST OPERATIONS TO IMPLEMENT:
             {test_understanding}
             
-            PDL SYNTAX EXAMPLES FROM TESSENT MANUALS, DTEG ITPP READER COMMANDS, AND example.pdl:
-            {relevant_pdl_knowledge}
-            
             CRITICAL INSTRUCTIONS:
-            1. Study the PDL examples above carefully
-            2. Use ONLY the commands and syntax shown in those examples
-            3. Follow the exact patterns you see (iProc, iWrite, iRead, iCall, iApply, etc.)
-            4. DO NOT invent commands - if you don't see it in the examples, don't use it
-            5. Match the TCL-like syntax structure from the examples
-            6. ALWAYS start with these TWO header lines (in this exact order):
+            1. Use standard PDL commands and syntax
+            2. Follow PDL patterns (iProc, iWrite, iRead, iCall, iApply, etc.)
+            3. Match the TCL-like syntax structure
+            4. ALWAYS start with these TWO header lines (in this exact order):
                iProcsForModule [get_single_name [get_current_design -icl]] 
                source $::env(DUVE_M_HOME)/verif/pdl/common/tap_utils.pdl
-            7. PRIORITIZE using iSim commands when applicable (poll_signal, peek_signal, macro_map)
-            8. COMPULSORY: Validate iSim command parameters from examples:
+            5. Use iSim commands when applicable (poll_signal, peek_signal, macro_map)
+            6. iSim command parameters:
                - iSim poll_signal: requires signal_path, expected_value, timeout, step_size
                - iSim peek_signal: requires signal_path, expected_value
                - iSim macro_map: requires alias, rtl_path
-               - Check examples for exact parameter formats and values
-            9. CRITICAL: Use iSim macro_map for repeating signal paths:
+            7. Use iSim macro_map for repeating signal paths:
                - If signal hierarchies are long or used multiple times, create macro mappings
-               - Place macro_map commands at the start of procedures (typically in an initialization iProc)
+               - Place macro_map commands at the start of procedures
                - Pattern: iSim macro_map short_alias full.hierarchical.path.to.signal
                - Reference mapped signals with backtick prefix: `short_alias
-               - Example from example.pdl:
-                 iSim macro_map man_fuse_sip_rel_req pcd_tb.pcd.parfuse.parfuse_pwell_wrapper.fuse_top1.i_chassis_fuse_controller_top.i_fuse_array_cntrl.i_fuse_array_cntrl_tap.man_fuse_sip_release_req
-                 iSim poll_signal `man_fuse_sip_rel_req 0x1 10us 5ns
-               - This makes code cleaner and easier to maintain
-            10. Use iNote "description" in your PDL code to document what each section is doing
-            10. If converting from SPF, use the SPF label values in your PDL iNote descriptions
+            8. Use iNote "description" in your PDL code to document what each section is doing
+            9. If converting from SPF, use the SPF label values in your PDL iNote descriptions
                 NOTE: iNote is a PDL command - it's not used in SPF source files
-            11. PRESERVE EXACT signal paths and register names - do NOT modify, rename, or shorten them
-            12. Copy signal/register names character-for-character from the test operations description
-            13. CRITICAL: Distinguish bit numbers from field names:
+            10. PRESERVE EXACT signal paths and register names - do NOT modify, rename, or shorten them
+            11. Copy signal/register names character-for-character from the test operations description
+            12. Distinguish bit numbers from field names:
                 - If test operations show register[7] or register[15:8], that's BIT ACCESS, not a field
                 - Use register.FIELD_NAME only for actual named fields (e.g., register.Enable)
                 - DO NOT convert bit numbers to field names (register[7] ≠ register.7)
-                - Check PDL examples for proper bit/field access syntax
-            14. CRITICAL: Use explicit prefixes for ALL PDL values:
+            13. Use explicit prefixes for ALL PDL values:
                 - Binary values: ALWAYS use 0b prefix (0b1, 0b0, 0b1010, 0b11111111)
                 - Hexadecimal values: ALWAYS use 0x prefix (0x0, 0x1234, 0xABCD, 0xFFFFFFFF)
                 - Decimal values: Use 0d prefix or no prefix (0d10, 0d255, or 100)
                 - NEVER write ambiguous values - always make the base explicit
-                - Examples: Write 0b1 not 1, write 0x10 not 10 (unless clearly decimal)
-            15. COMPULSORY: Check examples for parameter requirements BEFORE writing each command:
+            14. Check parameter requirements BEFORE writing each command:
                 - How many parameters does each command need?
                 - What format should values be in? (0x1234 for hex, 0b1010 for binary, decimal, "string")
                 - What is the correct parameter order?
-                - Match parameter formats EXACTLY as shown in examples
             
-            Look at the examples to understand:
-            - FIRST: How to use iSim commands (poll_signal, peek_signal, macro_map) - CHECK THESE FIRST
-            - How to define procedures (iProc)
-            - How to write registers (iWrite)
-            - How to read registers (iRead)
-            - How to apply operations (iApply)
-            - How to add timing (iRunLoop)
-            - How to call procedures (iCall)
-            - How to add descriptive notes (iNote "description")
-            - What value formats each command expects (hex 0x, binary 0b, decimal, strings)
+            PDL command reference:
+            - iProc: Define procedures
+            - iWrite: Write to registers
+            - iRead: Read registers
+            - iApply: Apply operations
+            - iRunLoop: Add timing delays
+            - iCall: Call procedures
+            - iNote: Add descriptive notes
+            - iSim poll_signal: Poll signal until expected value
+            - iSim peek_signal: Check signal value
+            - iSim macro_map: Map signal aliases
             
             Format your response EXACTLY as:
             === PDL CODE ===
             iProcsForModule [get_single_name [get_current_design -icl]] 
             source $::env(DUVE_M_HOME)/verif/pdl/common/tap_utils.pdl
             
-            [Rest of PDL code using ONLY commands from the examples above]
-            [PRIORITIZE iSim commands where applicable]
+            [Rest of PDL code using standard PDL commands]
+            [Use iSim commands where applicable]
             [Use iSim macro_map for any repeated or long signal paths - define mappings early]
             [Reference mapped signals with backtick prefix: `alias_name]
             [Include iNote statements to describe what each PDL section does]
             [NOTE: The two header lines and iNote are PDL-specific, not used in SPF]
             [Use EXACT signal paths and register names from test operations - copy them exactly]
-            [Use correct value formats for each parameter - check examples first]
+            [Use correct value formats for each parameter]
             [Ensure iSim commands have all required parameters]
             [Use register.FIELD_NAME for named fields, NOT for bit numbers]
             [Use explicit prefixes: 0b for binary, 0x for hex, 0d for decimal]
             
             === IMPLEMENTATION NOTES ===
-            [List which PDL commands you used and confirm they came from the examples]
+            [List which PDL commands you used]
             [If iSim commands used, list them and confirm parameters are complete and correct]
             [If iSim macro_map used, list the mappings created and why they were beneficial]
             [Confirm that all signal paths and register names match the test operations exactly]
-            [Confirm that all parameter formats match the examples (hex/binary/decimal/string)]
+            [Confirm parameter formats used (hex/binary/decimal/string)]
             [List what parameter formats you used for each command]
             [Confirm bit numbers vs field names are correctly distinguished]
             [Confirm all values use explicit prefixes (0b, 0x, 0d)]
@@ -925,26 +791,19 @@ class MyCustomPlugin(AgentPlugin):
     def run_pdl_expert_mode(self, context, **kwargs):
         """
         Interactive PDL expert consultation mode with conversation history.
-        Users can ask questions about PDL and get answers based on the RAG knowledge base.
+        Users can ask questions about PDL and get answers.
         The agent remembers previous questions and answers in the session.
         """
         from rich.markdown import Markdown
         
         # Display header
         self.console.rule("[bold blue]PDL Expert Consultation Mode[/bold blue]", style="blue")
-        self.console.print("\n[bold cyan]Ask questions about Tessent PDL syntax, commands, and best practices.[/bold cyan]")
-        self.console.print("[dim]Tips:[/dim]")
+        self.console.print("\n[bold cyan]PDL Expert Consultation Mode - Interactive Q&A[/bold cyan]")
+        self.console.print("\n[bold yellow]📝 Note:[/bold yellow] This mode works best in CLI. In TUI, the interactive prompt loop is not yet supported.")
+        self.console.print("\n[dim]Ask questions about Tessent PDL syntax, commands, and best practices.[/dim]")
         self.console.print("[dim]  • Press alt+Enter to submit your question or Enter for a new line[/dim]")
         self.console.print("[dim]  • Type 'exit', 'quit', or 'done' to end the session[/dim]")
         self.console.print("[dim]  • The agent remembers your conversation history[/dim]\n")
-        
-        # Check RAG knowledge base
-        if self.rag_kb:
-            stats = self.rag_kb.get_stats()
-            self.console.print(f"[green]✓ Knowledge base loaded: {stats['total_chunks']} chunks available[/green]")
-            self.console.print(f"[green]✓ example.pdl loaded in knowledge base[/green]\n")
-        else:
-            self.console.print("[yellow]⚠ RAG knowledge base not available. Using legacy mode.[/yellow]\n")
         
         # Interactive loop with conversation history
         session_history = []
@@ -963,13 +822,6 @@ class MyCustomPlugin(AgentPlugin):
                 
                 question_count += 1
                 
-                # Build RAG query from the question
-                rag_query = f"PDL {user_question}"
-                
-                # Retrieve relevant knowledge with spinner
-                with self.console.status("[bold cyan]Just a sec...", spinner="dots") as status:
-                    relevant_knowledge = self.get_relevant_knowledge(rag_query, top_k=10)
-                
                 # Build conversation history for context
                 conversation_history_text = ""
                 if conversation_context:
@@ -983,20 +835,18 @@ class MyCustomPlugin(AgentPlugin):
                 
                 CURRENT USER QUESTION: {user_question}
                 
-                RELEVANT PDL DOCUMENTATION AND EXAMPLES:
-                {relevant_knowledge}
-                
-                Please answer the user's current question based on the documentation above.
+                Please answer the user's question about PDL (Procedural Description Language).
                 If the question refers to previous conversation (e.g., "what about...", "can you explain more...", "how does that work..."),
                 use the conversation history context to provide a coherent response.
                 
                 Provide clear explanations and code examples when appropriate.
-                Use ONLY commands and syntax shown in the documentation.
+                Use standard PDL commands and syntax including:
+                - iProc, iWrite, iRead, iApply, iCall, iRunLoop, iNote
+                - iSim commands: poll_signal, peek_signal, macro_map
                 
                 IMPORTANT: 
-                - When citing sources, use the FULL FILE PATH provided in the [Full Path: ...] headers above
                 - Format your response using proper Markdown syntax
-                - Include file references so users can locate the source files
+                - Provide practical code examples where relevant
                 - Maintain context from previous questions in this session when relevant
                 """
                 
@@ -1056,13 +906,11 @@ class MyCustomPlugin(AgentPlugin):
         """
         Main entry point - routes to appropriate mode based on user selection.
         """
-        # Get mode from initializer_args or prompt if not set
+        # Get mode from initializer_args (populated by get_initializer_args)
         mode = self.initializer_args.get('mode')
         
-        # If no mode in initializer_args, this means get_initializer_args wasn't called yet
-        # This can happen in some agent framework flows
+        # If no mode, call get_initializer_args to prompt user
         if not mode:
-            # Call get_initializer_args to get user input
             init_args = self.get_initializer_args()
             self.initializer_args.update(init_args)
             mode = self.initializer_args.get('mode', '1')
@@ -1189,689 +1037,3 @@ class MyCustomPlugin(AgentPlugin):
             self.console.print("\n[bold red]Failed Conversions:[/bold red]")
             for failed_file in failed_files:
                 self.console.print(f"  • {failed_file}")
-
-class RAGKnowledgeBase:
-    """
-    RAG-based knowledge base that uses vector embeddings and semantic search
-    to retrieve relevant information from PDF documents.
-    """
-    
-    def __init__(
-        self,
-        pdf_dir: Path,
-        cache_dir: Optional[Path] = None,
-        embedding_model: str = "all-MiniLM-L6-v2",
-        chunk_size: int = 1000,
-        chunk_overlap: int = 200,
-        collection_name: str = "tessent_knowledge"
-    ):
-        """
-        Initialize RAG Knowledge Base.
-        
-        Args:
-            pdf_dir: Directory containing PDF files
-            cache_dir: Directory for caching embeddings (defaults to pdf_dir/.rag_cache)
-            embedding_model: HuggingFace model name for embeddings
-            chunk_size: Size of text chunks in characters
-            chunk_overlap: Overlap between chunks for context preservation
-            collection_name: Name of the ChromaDB collection
-        """
-        self.console = Console()
-        self.pdf_dir = Path(pdf_dir)
-        self.cache_dir = cache_dir or (self.pdf_dir / ".rag_cache")
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
-        self.embedding_model_name = embedding_model
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
-        self.collection_name = collection_name
-        
-        # Initialize components
-        self.embedding_model = None
-        self.chroma_client = None
-        self.collection = None
-        
-        # Check dependencies
-        self._check_dependencies()
-        
-        # Initialize models and database
-        self._initialize_components()
-    
-    def _check_dependencies(self):
-        """Check if required dependencies are installed."""
-        missing = []
-        
-        if PyPDF2 is None:
-            missing.append("PyPDF2")
-        if SentenceTransformer is None:
-            missing.append("sentence-transformers")
-        if chromadb is None:
-            missing.append("chromadb")
-        
-        if missing:
-            error_msg = f"Missing required packages: {', '.join(missing)}"
-            self.console.print(f"[bold red]Error: {error_msg}[/bold red]")
-            self.console.print("\n[yellow]Install with:[/yellow]")
-            self.console.print(f"  pip install {' '.join(missing)}")
-            raise ImportError(error_msg)
-    
-    def _initialize_components(self):
-        """Initialize embedding model and vector database."""
-        try:
-            # Initialize ChromaDB first to check if we have existing data
-            chroma_path = str(self.cache_dir / "chroma_db")
-            self.chroma_client = chromadb.PersistentClient(path=chroma_path)
-            
-            # Get or create collection
-            self.collection = self.chroma_client.get_or_create_collection(
-                name=self.collection_name,
-                metadata={"hnsw:space": "cosine"}
-            )
-            
-            # Check if we have existing embeddings
-            existing_count = self.collection.count()
-            is_new = existing_count == 0
-            
-            if is_new:
-                self.console.print("[bold cyan]Initializing RAG Knowledge Base...[/bold cyan]")
-            
-            # Load embedding model
-            if is_new:
-                self.console.print(f"[yellow]Loading embedding model:[/yellow] {self.embedding_model_name}")
-            self.embedding_model = SentenceTransformer(self.embedding_model_name)
-            if is_new:
-                self.console.print(f"  [green]✓[/green] Embedding model loaded")
-                self.console.print(f"  [green]✓[/green] Vector database initialized")
-            
-        except Exception as e:
-            self.console.print(f"[red]Error initializing components: {e}[/red]")
-            raise
-    
-    def _get_pdf_hash(self, pdf_path: Path) -> str:
-        """Generate hash of PDF file for caching."""
-        hash_obj = hashlib.md5()
-        with open(pdf_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                hash_obj.update(chunk)
-        return hash_obj.hexdigest()
-    
-    def extract_text_from_pdf(self, pdf_path: Path) -> str:
-        """
-        Extract all text from a PDF file.
-        
-        Args:
-            pdf_path: Path to PDF file
-            
-        Returns:
-            Extracted text content
-        """
-        try:
-            with open(pdf_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
-                text = ""
-                for page_num in range(len(pdf_reader.pages)):
-                    page = pdf_reader.pages[page_num]
-                    text += page.extract_text() + "\n"
-                return text
-        except Exception as e:
-            self.console.print(f"[red]Error extracting text from {pdf_path.name}: {e}[/red]")
-            return ""
-    
-    def extract_text_from_docx(self, docx_path: Path) -> str:
-        """
-        Extract all text from a .docx file.
-        
-        Args:
-            docx_path: Path to .docx file
-            
-        Returns:
-            Extracted text content
-        """
-        if Document is None:
-            self.console.print(f"[yellow]⚠ python-docx not installed. Install with: pip install python-docx[/yellow]")
-            return ""
-        
-        try:
-            doc = Document(str(docx_path))
-            text = ""
-            for paragraph in doc.paragraphs:
-                text += paragraph.text + "\n"
-            # Also extract text from tables
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        text += cell.text + "\n"
-            return text
-        except Exception as e:
-            self.console.print(f"[red]Error extracting text from {docx_path.name}: {e}[/red]")
-            return ""
-    
-    def chunk_text(self, text: str, metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Split text into overlapping chunks for better context preservation.
-        
-        Args:
-            text: Full text to chunk
-            metadata: Metadata to attach to each chunk
-            
-        Returns:
-            List of chunk dictionaries with text and metadata
-        """
-        chunks = []
-        start = 0
-        chunk_id = 0
-        
-        while start < len(text):
-            # Extract chunk
-            end = start + self.chunk_size
-            chunk_text = text[start:end]
-            
-            # Try to break at sentence boundary
-            if end < len(text):
-                # Look for sentence endings near the chunk boundary
-                last_period = chunk_text.rfind('. ')
-                last_newline = chunk_text.rfind('\n')
-                break_point = max(last_period, last_newline)
-                
-                if break_point > self.chunk_size * 0.5:  # Don't break too early
-                    chunk_text = chunk_text[:break_point + 1]
-                    end = start + break_point + 1
-            
-            # Create chunk with metadata
-            chunk = {
-                'text': chunk_text.strip(),
-                'metadata': {
-                    **metadata,
-                    'chunk_id': chunk_id,
-                    'start_char': start,
-                    'end_char': end
-                }
-            }
-            
-            if chunk['text']:  # Only add non-empty chunks
-                chunks.append(chunk)
-                chunk_id += 1
-            
-            # Move to next chunk with overlap
-            start = end - self.chunk_overlap
-        
-        return chunks
-    
-    def load_text_file(self, file_path: Path, source_name: str = None, force_reload: bool = False):
-        """
-        Load a text file (like .pdl) into the vector database.
-        
-        Args:
-            file_path: Path to the text file
-            source_name: Name to use for the source (defaults to filename)
-            force_reload: If True, reload even if already in database
-        """
-        if not file_path.exists():
-            self.console.print(f"[yellow]⚠[/yellow] File not found: {file_path}")
-            return
-        
-        source_name = source_name or file_path.name
-        
-        # Check if already processed
-        cache_file = self.cache_dir / "processed_docs.json"
-        processed_docs = {}
-        if cache_file.exists() and not force_reload:
-            with open(cache_file, 'r') as f:
-                processed_docs = json.load(f)
-            
-            # Check if file is already loaded
-            file_hash = self._get_pdf_hash(file_path)  # Reuse hash function
-            if source_name in processed_docs and processed_docs[source_name] == file_hash:
-                return  # Already loaded
-        
-        # Read text file
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                text = f.read()
-        except Exception as e:
-            self.console.print(f"[red]Error reading {file_path.name}: {e}[/red]")
-            return
-        
-        if not text:
-            return
-        
-        # Create chunks
-        file_hash = self._get_pdf_hash(file_path)
-        metadata = {
-            'source': source_name,
-            'doc_hash': file_hash,
-            'file_type': 'text'
-        }
-        chunks = self.chunk_text(text, metadata)
-        
-        if chunks:
-            # Generate embeddings and store
-            texts = [chunk['text'] for chunk in chunks]
-            embeddings = self.embedding_model.encode(texts, show_progress_bar=False)
-            
-            # Prepare for ChromaDB
-            ids = [f"{source_name}_{chunk['metadata']['chunk_id']}" for chunk in chunks]
-            metadatas = [chunk['metadata'] for chunk in chunks]
-            
-            # Add to collection
-            self.collection.add(
-                ids=ids,
-                embeddings=embeddings.tolist(),
-                documents=texts,
-                metadatas=metadatas
-            )
-            
-            # Update processed docs cache
-            processed_docs[source_name] = file_hash
-            with open(cache_file, 'w') as f:
-                json.dump(processed_docs, f, indent=2)
-    
-    def load_pdfs(self, pdf_files: Optional[List[str]] = None, force_reload: bool = False):
-        """
-        Load and process PDF files into the vector database.
-        
-        Args:
-            pdf_files: List of PDF filenames (searches in pdf_dir). If None, loads all PDFs.
-            force_reload: If True, reload even if already in database
-        """
-        # Check if knowledge base is already fully loaded
-        if not force_reload:
-            existing_count = self.collection.count()
-            cache_file = self.cache_dir / "processed_docs.json"
-            
-            if existing_count > 0 and cache_file.exists():
-                with open(cache_file, 'r') as f:
-                    processed_docs = json.load(f)
-                
-                # Check if we need to process the requested PDFs
-                if pdf_files is None:
-                    pdf_paths = list(self.pdf_dir.glob("*.pdf"))
-                else:
-                    pdf_paths = [self.pdf_dir / pdf for pdf in pdf_files]
-                
-                # Check if all requested PDFs are already processed
-                all_processed = True
-                for pdf_path in pdf_paths:
-                    if not pdf_path.exists():
-                        continue
-                    pdf_hash = self._get_pdf_hash(pdf_path)
-                    if pdf_path.name not in processed_docs or processed_docs[pdf_path.name] != pdf_hash:
-                        all_processed = False
-                        break
-                
-                if all_processed:
-                    self.console.print(f"[dim]RAG KB already loaded ({existing_count} chunks cached)[/dim]")
-                    return
-        
-        # Find PDF files
-        if pdf_files is None:
-            pdf_paths = list(self.pdf_dir.glob("*.pdf"))
-        else:
-            pdf_paths = [self.pdf_dir / pdf for pdf in pdf_files]
-        
-        if not pdf_paths:
-            self.console.print("[yellow]No PDF files found[/yellow]")
-            return
-        
-        self.console.print(f"\n[bold cyan]Loading {len(pdf_paths)} PDF(s) into RAG Knowledge Base[/bold cyan]")
-        
-        # Track processed documents
-        cache_file = self.cache_dir / "processed_docs.json"
-        processed_docs = {}
-        
-        if cache_file.exists() and not force_reload:
-            with open(cache_file, 'r') as f:
-                processed_docs = json.load(f)
-        
-        all_chunks = []
-        total_chunks = 0
-        
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            console=self.console
-        ) as progress:
-            
-            task = progress.add_task("[cyan]Processing PDFs...", total=len(pdf_paths))
-            
-            for pdf_path in pdf_paths:
-                if not pdf_path.exists():
-                    self.console.print(f"  [yellow]⚠[/yellow] File not found: {pdf_path.name}")
-                    progress.advance(task)
-                    continue
-                
-                # Check if already processed
-                pdf_hash = self._get_pdf_hash(pdf_path)
-                if pdf_path.name in processed_docs and processed_docs[pdf_path.name] == pdf_hash and not force_reload:
-                    self.console.print(f"  [dim]Skipping (cached): {pdf_path.name}[/dim]")
-                    progress.advance(task)
-                    continue
-                
-                # Extract text
-                progress.update(task, description=f"[cyan]Extracting: {pdf_path.name}")
-                text = self.extract_text_from_pdf(pdf_path)
-                
-                if not text:
-                    self.console.print(f"  [yellow]⚠[/yellow] No text extracted from {pdf_path.name}")
-                    progress.advance(task)
-                    continue
-                
-                # Create chunks
-                progress.update(task, description=f"[cyan]Chunking: {pdf_path.name}")
-                metadata = {
-                    'source': pdf_path.name,
-                    'doc_hash': pdf_hash
-                }
-                chunks = self.chunk_text(text, metadata)
-                
-                self.console.print(f"  [green]✓[/green] {pdf_path.name}: {len(chunks)} chunks ({len(text):,} chars)")
-                
-                all_chunks.extend(chunks)
-                total_chunks += len(chunks)
-                processed_docs[pdf_path.name] = pdf_hash
-                
-                progress.advance(task)
-        
-        # Generate embeddings and store in ChromaDB
-        if all_chunks:
-            self.console.print(f"\n[yellow]Generating embeddings for {total_chunks} chunks...[/yellow]")
-            
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                console=self.console
-            ) as progress:
-                
-                task = progress.add_task("[cyan]Computing embeddings...", total=total_chunks)
-                
-                # Process in batches for efficiency
-                batch_size = 100
-                for i in range(0, len(all_chunks), batch_size):
-                    batch = all_chunks[i:i + batch_size]
-                    texts = [chunk['text'] for chunk in batch]
-                    
-                    # Generate embeddings
-                    embeddings = self.embedding_model.encode(texts, show_progress_bar=False)
-                    
-                    # Prepare for ChromaDB
-                    ids = [f"{chunk['metadata']['source']}_{chunk['metadata']['chunk_id']}" for chunk in batch]
-                    metadatas = [chunk['metadata'] for chunk in batch]
-                    
-                    # Add to collection
-                    self.collection.add(
-                        ids=ids,
-                        embeddings=embeddings.tolist(),
-                        documents=texts,
-                        metadatas=metadatas
-                    )
-                    
-                    progress.advance(task, advance=len(batch))
-            
-            # Save processed documents cache
-            with open(cache_file, 'w') as f:
-                json.dump(processed_docs, f, indent=2)
-            
-            self.console.print(f"[green]✓ Successfully loaded {total_chunks} chunks into vector database[/green]")
-        else:
-            self.console.print("[yellow]No chunks to process[/yellow]")
-    
-    def load_docx_files(self, docx_files: Optional[List[str]] = None, force_reload: bool = False):
-        """
-        Load and process .docx files into the vector database.
-        
-        Args:
-            docx_files: List of .docx filenames (searches in pdf_dir). If None, loads all .docx files.
-            force_reload: If True, reload even if already in database
-        """
-        if Document is None:
-            self.console.print(f"[yellow]⚠ python-docx not installed. Skipping .docx files. Install with: pip install python-docx[/yellow]")
-            return
-        
-        # Find .docx files
-        if docx_files is None:
-            docx_paths = list(self.pdf_dir.glob("*.docx"))
-        else:
-            docx_paths = [self.pdf_dir / docx for docx in docx_files]
-        
-        if not docx_paths:
-            self.console.print("[yellow]No .docx files found[/yellow]")
-            return
-        
-        self.console.print(f"\n[bold cyan]Loading {len(docx_paths)} .docx file(s) into RAG Knowledge Base[/bold cyan]")
-        
-        # Track processed documents
-        cache_file = self.cache_dir / "processed_docs.json"
-        processed_docs = {}
-        
-        if cache_file.exists() and not force_reload:
-            with open(cache_file, 'r') as f:
-                processed_docs = json.load(f)
-        
-        all_chunks = []
-        total_chunks = 0
-        
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            console=self.console
-        ) as progress:
-            
-            task = progress.add_task("[cyan]Processing .docx files...", total=len(docx_paths))
-            
-            for docx_path in docx_paths:
-                if not docx_path.exists():
-                    self.console.print(f"  [yellow]⚠[/yellow] File not found: {docx_path.name}")
-                    progress.advance(task)
-                    continue
-                
-                # Check if already processed
-                docx_hash = self._get_pdf_hash(docx_path)  # Reuse hash function
-                if docx_path.name in processed_docs and processed_docs[docx_path.name] == docx_hash and not force_reload:
-                    self.console.print(f"  [dim]Skipping (cached): {docx_path.name}[/dim]")
-                    progress.advance(task)
-                    continue
-                
-                # Extract text
-                progress.update(task, description=f"[cyan]Extracting: {docx_path.name}")
-                text = self.extract_text_from_docx(docx_path)
-                
-                if not text:
-                    self.console.print(f"  [yellow]⚠[/yellow] No text extracted from {docx_path.name}")
-                    progress.advance(task)
-                    continue
-                
-                # Create chunks
-                progress.update(task, description=f"[cyan]Chunking: {docx_path.name}")
-                metadata = {
-                    'source': docx_path.name,
-                    'doc_hash': docx_hash,
-                    'file_type': 'docx'
-                }
-                chunks = self.chunk_text(text, metadata)
-                
-                self.console.print(f"  [green]✓[/green] {docx_path.name}: {len(chunks)} chunks ({len(text):,} chars)")
-                
-                all_chunks.extend(chunks)
-                total_chunks += len(chunks)
-                processed_docs[docx_path.name] = docx_hash
-                
-                progress.advance(task)
-        
-        # Generate embeddings and store in ChromaDB
-        if all_chunks:
-            self.console.print(f"\n[yellow]Generating embeddings for {total_chunks} chunks...[/yellow]")
-            
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                console=self.console
-            ) as progress:
-                
-                task = progress.add_task("[cyan]Computing embeddings...", total=total_chunks)
-                
-                # Process in batches for efficiency
-                batch_size = 100
-                for i in range(0, len(all_chunks), batch_size):
-                    batch = all_chunks[i:i + batch_size]
-                    texts = [chunk['text'] for chunk in batch]
-                    
-                    # Generate embeddings
-                    embeddings = self.embedding_model.encode(texts, show_progress_bar=False)
-                    
-                    # Prepare for ChromaDB
-                    ids = [f"{chunk['metadata']['source']}_{chunk['metadata']['chunk_id']}" for chunk in batch]
-                    metadatas = [chunk['metadata'] for chunk in batch]
-                    
-                    # Add to collection
-                    self.collection.add(
-                        ids=ids,
-                        embeddings=embeddings.tolist(),
-                        documents=texts,
-                        metadatas=metadatas
-                    )
-                    
-                    progress.advance(task, advance=len(batch))
-            
-            # Save processed documents cache
-            with open(cache_file, 'w') as f:
-                json.dump(processed_docs, f, indent=2)
-            
-            self.console.print(f"[green]✓ Successfully loaded {total_chunks} chunks from .docx files into vector database[/green]")
-        else:
-            self.console.print("[yellow]No chunks to process[/yellow]")
-    
-    def retrieve_relevant_context(
-        self, 
-        query: str, 
-        top_k: int = 5,
-        min_similarity: float = 0.0
-    ) -> List[Dict[str, Any]]:
-        """
-        Retrieve the most relevant text chunks for a given query.
-        
-        Args:
-            query: Search query
-            top_k: Number of top results to return
-            min_similarity: Minimum similarity score (0-1)
-            
-        Returns:
-            List of relevant chunks with text, metadata, and similarity scores
-        """
-        try:
-            # Generate query embedding
-            query_embedding = self.embedding_model.encode([query])[0]
-            
-            # Search in ChromaDB
-            results = self.collection.query(
-                query_embeddings=[query_embedding.tolist()],
-                n_results=top_k
-            )
-            
-            # Format results
-            relevant_chunks = []
-            if results['documents'] and results['documents'][0]:
-                for i, (doc, metadata, distance) in enumerate(zip(
-                    results['documents'][0],
-                    results['metadatas'][0],
-                    results['distances'][0]
-                )):
-                    # Convert distance to similarity (cosine distance -> similarity)
-                    similarity = 1 - distance
-                    
-                    if similarity >= min_similarity:
-                        relevant_chunks.append({
-                            'text': doc,
-                            'metadata': metadata,
-                            'similarity': similarity,
-                            'rank': i + 1
-                        })
-            
-            return relevant_chunks
-        
-        except Exception as e:
-            self.console.print(f"[red]Error retrieving context: {e}[/red]")
-            return []
-    
-    def get_context_for_query(
-        self, 
-        query: str, 
-        top_k: int = 5,
-        include_metadata: bool = False
-    ) -> str:
-        """
-        Get formatted context string for a query.
-        
-        Args:
-            query: Search query
-            top_k: Number of chunks to retrieve
-            include_metadata: Include source metadata in output
-            
-        Returns:
-            Formatted context string
-        """
-        chunks = self.retrieve_relevant_context(query, top_k=top_k)
-        
-        if not chunks:
-            return "No relevant context found in knowledge base."
-        
-        context_parts = []
-        for chunk in chunks:
-            source_name = chunk['metadata']['source']
-            # Construct full file path for reference
-            full_path = self.pdf_dir / source_name
-            
-            if include_metadata:
-                header = f"[Source: {source_name} | Full Path: {full_path} | Similarity: {chunk['similarity']:.2f}]"
-                context_parts.append(f"{header}\n{chunk['text']}\n")
-            else:
-                # Include file path reference even when include_metadata is False
-                # This helps the agent provide proper file references to users
-                header = f"[Source: {source_name} | Full Path: {full_path}]"
-                context_parts.append(f"{header}\n{chunk['text']}\n")
-        
-        return "\n\n---\n\n".join(context_parts)
-    
-    def search_knowledge_base(self, query: str, top_k: int = 5) -> None:
-        """
-        Interactive search and display of knowledge base results.
-        
-        Args:
-            query: Search query
-            top_k: Number of results to display
-        """
-        self.console.print(f"\n[bold cyan]Searching for:[/bold cyan] '{query}'")
-        
-        chunks = self.retrieve_relevant_context(query, top_k=top_k)
-        
-        if not chunks:
-            self.console.print("[yellow]No relevant results found[/yellow]")
-            return
-        
-        self.console.print(f"\n[green]Found {len(chunks)} relevant chunks:[/green]\n")
-        
-        for i, chunk in enumerate(chunks, 1):
-            self.console.rule(f"[bold]Result {i}[/bold]", style="blue")
-            self.console.print(f"[dim]Source:[/dim] {chunk['metadata']['source']}")
-            self.console.print(f"[dim]Similarity:[/dim] {chunk['similarity']:.3f}")
-            self.console.print(f"\n{chunk['text'][:500]}...")
-            self.console.print()
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """Get statistics about the knowledge base."""
-        count = self.collection.count()
-        
-        return {
-            "total_chunks": count,
-            "embedding_model": self.embedding_model_name,
-            "chunk_size": self.chunk_size,
-            "chunk_overlap": self.chunk_overlap,
-            "cache_dir": str(self.cache_dir)
-        }

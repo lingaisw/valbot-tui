@@ -147,3 +147,76 @@ class ContextManager:
         """Clear the conversation history."""
         self.console.print("[bold yellow]Conversation history cleared.[/bold yellow]")
         self.conversation_history = []
+    
+    def remove_file_from_context(self, file_path: str):
+        """
+        Remove a specific file's context from the conversation history.
+        
+        Args:
+            file_path: Path to the file to remove from context
+        """
+        # Find and remove the context blocks for this file
+        # Context blocks are marked with system messages containing the file name
+        indices_to_remove = []
+        
+        # Normalize the file path for comparison (resolve to absolute path)
+        normalized_file_path = os.path.abspath(os.path.normpath(file_path))
+        
+        i = 0
+        while i < len(self.conversation_history):
+            msg = self.conversation_history[i]
+            
+            # Look for the "beginning of context" marker
+            if (msg.get("role") == "system" and 
+                "following is the context for the conversation it came from a file called" in msg.get("content", "")):
+                
+                # Extract the file path from the message
+                # Message format: "\nThe following is the context for the conversation it came from a file called {file}:\n"
+                content = msg.get("content", "")
+                try:
+                    # Extract the file path from the message
+                    file_marker = "it came from a file called "
+                    if file_marker in content:
+                        start_idx = content.index(file_marker) + len(file_marker)
+                        # Find the end (either newline or colon)
+                        end_idx = content.find(":", start_idx)
+                        if end_idx == -1:
+                            end_idx = content.find("\n", start_idx)
+                        if end_idx == -1:
+                            end_idx = len(content)
+                        
+                        stored_file_path = content[start_idx:end_idx].strip()
+                        
+                        # Normalize the stored path for comparison
+                        normalized_stored_path = os.path.abspath(os.path.normpath(stored_file_path))
+                        
+                        # Compare normalized paths
+                        if normalized_file_path == normalized_stored_path:
+                            # Mark this message for removal
+                            indices_to_remove.append(i)
+                            
+                            # Also mark the next two messages (content + end marker)
+                            if i + 1 < len(self.conversation_history):
+                                indices_to_remove.append(i + 1)
+                            if i + 2 < len(self.conversation_history):
+                                indices_to_remove.append(i + 2)
+                            
+                            # Skip ahead past these messages
+                            i += 3
+                            continue
+                except Exception:
+                    # If parsing fails, skip this message
+                    pass
+            
+            i += 1
+        
+        # Remove in reverse order to maintain indices
+        for idx in sorted(indices_to_remove, reverse=True):
+            if 0 <= idx < len(self.conversation_history):
+                self.conversation_history.pop(idx)
+        
+        if indices_to_remove:
+            self.console.print(f"[bold green]Removed file from context:[/bold green] [cyan]{file_path}[/cyan]")
+        else:
+            self.console.print(f"[bold yellow]File not found in context:[/bold yellow] [cyan]{file_path}[/cyan]")
+

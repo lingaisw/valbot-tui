@@ -298,8 +298,8 @@ ${BOLD}Step 5:${NC} Create convenience launcher script."
 # Get the directory where this script is located
 SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 
-# Change to the script directory
-cd "\$SCRIPT_DIR"
+# Don't change to script directory - stay in caller's directory
+# cd "\$SCRIPT_DIR"
 
 # Check if Python is available
 if ! command -v python3 &> /dev/null; then

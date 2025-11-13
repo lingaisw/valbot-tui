@@ -164,8 +164,8 @@ echo.
 echo REM Get the directory where this script is located
 echo set SCRIPT_DIR=%%~dp0
 echo.
-echo REM Change to the script directory
-echo cd /d "%%SCRIPT_DIR%%"
+echo REM Don't change to script directory - stay in caller's directory
+echo REM cd /d "%%SCRIPT_DIR%%"
 echo.
 echo REM Hardcoded virtual environment path from setup
 echo set VENV_PATH=%VENV_PATH%
@@ -181,7 +181,7 @@ echo ^)
 echo.
 echo REM Launch the TUI
 echo echo Starting ValBot TUI...
-echo python valbot_tui_launcher.py %%*
+echo python "%%SCRIPT_DIR%%valbot_tui_launcher.py" %%*
 echo.
 echo REM Deactivate virtual environment if it was activated
 echo if defined VIRTUAL_ENV ^(

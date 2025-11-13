@@ -123,7 +123,7 @@ class ValbotUpdater:
             if status_output:
                 # Parse modified files and filter out ignored files/folders
                 modified_files = []
-                ignored_patterns = ['.env', '__pycache__', 'valbot-venv']
+                ignored_patterns = ['.env', '__pycache__', 'valbot-venv','.sh']
                 
                 for line in status_output.split('\n'):
                     if line.strip():

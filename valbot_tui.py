@@ -3482,6 +3482,7 @@ Please check your configuration and try again.
         # Priority 1: Check if inline picker or file explorer panel is visible - close both if open
         picker_closed = False
         file_panel_closed = False
+        autocomplete_closed = False
         
         # Priority 1: Close agent & file panels if open
         try:
@@ -3500,8 +3501,14 @@ Please check your configuration and try again.
             self.show_files = False
             file_panel_closed = True
         
+        # Check if autocomplete/suggestions list is open
+        if hasattr(self, '_autocomplete_overlay') and self._autocomplete_overlay:
+            if self._autocomplete_overlay.styles.display != "none":
+                self.hide_autocomplete()
+                autocomplete_closed = True
+        
         # If we closed any UI elements, return focus to command input and don't cancel AI
-        if picker_closed or file_panel_closed:
+        if picker_closed or file_panel_closed or autocomplete_closed:
             command_input = self.query_one("#command-input", CommandInput)
             command_input.focus()
             return
@@ -3574,7 +3581,25 @@ Please check your configuration and try again.
         
         # Process command or message
         if message.strip().startswith("/"):
-            await self.handle_command(message.strip())
+            command_handled = await self.handle_command(message.strip())
+            # If command was not recognized, treat it as normal chat input
+            if not command_handled:
+                # For multiline messages, we need to format them properly for Markdown
+                # Convert single newlines to double newlines for proper Markdown line breaks
+                formatted_message = message.replace('\n', '\n\n')
+                
+                # Display user message immediately
+                chat_panel = self.query_one("#chat-panel", ChatPanel)
+                chat_panel.add_message("user", formatted_message)
+                
+                # Send the original message to the chatbot (without double newlines) in background thread
+                import threading
+                thread = threading.Thread(
+                    target=self._send_chat_message_in_thread,
+                    args=(message,),
+                    daemon=True
+                )
+                thread.start()
         else:
             # For multiline messages, we need to format them properly for Markdown
             # Convert single newlines to double newlines for proper Markdown line breaks
@@ -3593,12 +3618,13 @@ Please check your configuration and try again.
             )
             thread.start()
     
-    async def handle_command(self, command: str):
-        """Handle slash commands using CommandManager."""
-        chat_panel = self.query_one("#chat-panel", ChatPanel)
+    async def handle_command(self, command: str) -> bool:
+        """Handle slash commands using CommandManager.
         
-        # Display the user's command input in the chat with backtick formatting
-        chat_panel.add_message("user", f"`{command}`")
+        Returns:
+            bool: True if command was handled, False if command is not recognized
+        """
+        chat_panel = self.query_one("#chat-panel", ChatPanel)
         
         parts = command.split(maxsplit=1)
         cmd = parts[0].lower()
@@ -3606,6 +3632,8 @@ Please check your configuration and try again.
         
         # Check for /add_agent and /add_tool commands - handle with threading directly
         if cmd == "/add_agent":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             # Start in a separate thread using Python's threading module directly
             import threading
             thread = threading.Thread(
@@ -3614,9 +3642,11 @@ Please check your configuration and try again.
                 daemon=True
             )
             thread.start()
-            return
+            return True
         
         elif cmd == "/add_tool":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             # Start in a separate thread using Python's threading module directly
             import threading
             thread = threading.Thread(
@@ -3625,14 +3655,18 @@ Please check your configuration and try again.
                 daemon=True
             )
             thread.start()
-            return
+            return True
         
         # Handle TUI-specific commands first (these need special UI handling)
         if cmd == "/quit":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             self.app.exit()
-            return
+            return True
         
         elif cmd == "/reload":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             # Handle /reload BEFORE CommandManager to avoid blocking Confirm.ask()
             chat_panel.add_message("system", """### ↻ Reload Configuration
 
@@ -3645,10 +3679,12 @@ Restarting TUI to reload configuration...
                 self.app.exit()
             
             self.set_timer(0.5, do_restart)
-            return  # Return immediately after scheduling
+            return True  # Return immediately after scheduling
         
         elif cmd == "/update":
-            # Run update in TU/upI using ValbotUpdater in a background thread
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
+            # Run update in TUI using ValbotUpdater in a background thread
             import threading
             
             chat_panel.add_message("system", f"{EMOJI['gear']} Checking for updates...")
@@ -3659,9 +3695,11 @@ Restarting TUI to reload configuration...
                 daemon=True
             )
             thread.start()
-            return
+            return True
         
         elif cmd == "/agent":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             # Override CLI's agent command with TUI-specific inline picker
             if self.chatbot and hasattr(self.chatbot, 'plugin_manager'):
                 agents = self.chatbot.plugin_manager.plugin_info
@@ -3693,14 +3731,18 @@ Restarting TUI to reload configuration...
                     chat_panel.add_message("system", "No agents available. Use `/add_agent` to add one.")
             else:
                 chat_panel.add_message("error", "Plugin manager not initialized.")
-            return
+            return True
         
         elif cmd == "/model":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             # Override CLI's model command with TUI-specific picker
             await self.action_change_model()
-            return
+            return True
         
         elif cmd == "/new":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             # Override CLI's clear command to completely restart from scratch
             chat_panel.clear_messages()
             # Clear any streaming message reference
@@ -3735,9 +3777,11 @@ Restarting TUI to reload configuration...
                 self.chatbot._conversation_id = None
             
             chat_panel.add_message("system", f"{EMOJI['checkmark']} Started new chat.")
-            return
+            return True
             
         elif cmd == "/help":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             chat_panel.add_message("system", """### ⌨️ ValBot Help
 
 **Available Commands:**
@@ -3764,9 +3808,11 @@ Restarting TUI to reload configuration...
 
 For more detailed help, try the CLI mode with `--help` flag.
 """)
-            return
+            return True
             
         elif cmd == "/settings":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             chat_panel.add_message("system", """### {EMOJI['gear']} Settings
 
 Settings management is available in CLI mode only.
@@ -3781,16 +3827,18 @@ python app.py
 
 Use `/model` to change the current model.
 """)
-            return
+            return True
         
         # Try to use CommandManager for standard commands
         if hasattr(self.chatbot, 'command_manager'):
             # Check if command exists in CommandManager
             if cmd in self.chatbot.command_manager.command_registry or cmd in self.chatbot.command_manager.prompts:
+                # Display the user's command input in the chat with backtick formatting
+                chat_panel.add_message("user", f"`{command}`")
                 try:
                     # Let CommandManager handle the command
                     self.chatbot.command_manager.handle_command(command)
-                    return
+                    return True
                 except Exception as e:
                     chat_panel.add_message("error", f"""### {EMOJI['cross']} Command Error
 
@@ -3800,10 +3848,12 @@ Error executing command `{cmd}`:
 {str(e)}
 ```
 """)
-                    return
+                    return True
         
         # Handle additional TUI-specific commands not in CommandManager
         if cmd == "/help":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             help_text = """# 📚 ValBot TUI Help
 
 ### Available Commands
@@ -4008,8 +4058,11 @@ Need more help? Just ask ValBot directly!
 **ValBot TUI** - Your AI-Powered Assistant
 """
             chat_panel.add_message("system", help_text)
+            return True
                 
         elif cmd == "/terminal":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             if args:
                 await chat_panel.add_terminal_output(args)
             else:
@@ -4022,8 +4075,11 @@ Need more help? Just ask ValBot directly!
 - `/terminal python --version`
 - `/terminal git status`
 """)
+            return True
                 
         elif cmd == "/file":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             if args:
                 try:
                     file_path = Path(args).expanduser()
@@ -4075,8 +4131,11 @@ Need more help? Just ask ValBot directly!
                     chat_panel.add_message("error", f"{EMOJI['cross']} Error reading file: {str(e)}")
             else:
                 chat_panel.add_message("system", "**Usage**: `/file <path>`\n\nExample: `/file ./config.py`")
+            return True
         
         elif cmd == "/context":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             # Load file(s) into conversation context
             if args and self.chatbot:
                 try:
@@ -4121,8 +4180,11 @@ You can now ask questions about these files!
 - `/context *.py` - Load all Python files
 - `/context src/**/*.js` - Load all JS files in src/
 """)
+            return True
         
         elif cmd == "/multi":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             # Multi-line input using system editor
             chat_panel.add_message("system", """### 📝 Multi-line Input
 
@@ -4160,8 +4222,11 @@ Default: vim (Linux/Mac) or notepad (Windows)
                     
             except Exception as e:
                 chat_panel.add_message("error", f"{EMOJI['cross']} Error with multi-line input: {str(e)}")
+            return True
         
         elif cmd == "/create_database":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             # Create a new RAG database
             if not args:
                 chat_panel.add_message("system", """### 📚 Create RAG database
@@ -4187,9 +4252,11 @@ The cache and database files will be stored in the output folder.
                     daemon=True
                 )
                 thread.start()
-            return
+            return True
         
         elif cmd == "/load_database":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             # Load and query an existing RAG database
             if not args:
                 chat_panel.add_message("system", """### 📚 Load RAG database
@@ -4212,9 +4279,11 @@ After loading, just type your questions normally in chat!
                     daemon=True
                 )
                 thread.start()
-            return
+            return True
         
         elif cmd == "/settings":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
             chat_panel.add_message("system", """### {EMOJI['gear']} Settings
 
 The settings TUI is not yet available in this version.
@@ -4231,9 +4300,11 @@ You can manually edit your configuration file at:
 - `general.ascii_banner_size` - Banner size
 - `general.display_commands_on_startup` - Show commands on start
 """)
+            return True
                 
         else:
-            chat_panel.add_message("error", f"{EMOJI['cross']} Unknown command: `{cmd}`\n\nType `/help` for available commands.")
+            # Command not recognized - return False so it can be treated as normal input
+            return False
     
     
     def _run_add_agent_in_thread(self, args: str):

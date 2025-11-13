@@ -3584,19 +3584,22 @@ Please check your configuration and try again.
             command_handled = await self.handle_command(message.strip())
             # If command was not recognized, treat it as normal chat input
             if not command_handled:
+                # Remove the leading '/' since it's not actually a command
+                message_without_slash = message.lstrip('/').strip()
+                
                 # For multiline messages, we need to format them properly for Markdown
                 # Convert single newlines to double newlines for proper Markdown line breaks
-                formatted_message = message.replace('\n', '\n\n')
+                formatted_message = message_without_slash.replace('\n', '\n\n')
                 
-                # Display user message immediately
+                # Display user message immediately (without the /)
                 chat_panel = self.query_one("#chat-panel", ChatPanel)
                 chat_panel.add_message("user", formatted_message)
                 
-                # Send the original message to the chatbot (without double newlines) in background thread
+                # Send the message without slash to the chatbot (without double newlines) in background thread
                 import threading
                 thread = threading.Thread(
                     target=self._send_chat_message_in_thread,
-                    args=(message,),
+                    args=(message_without_slash,),
                     daemon=True
                 )
                 thread.start()
@@ -5778,7 +5781,7 @@ To unload all databases and return to normal chat, use `/new`.
             self.app.call_from_thread(
                 chat_panel.add_message,
                 "system",
-                f"🔍 Searching {db_label}..."
+                f"{EMOJI['lightbulb']} Searching {db_label}..."
             )
             
             # Query all loaded databases and combine results
@@ -5799,7 +5802,7 @@ To unload all databases and return to normal chat, use `/new`.
                     self.app.call_from_thread(
                         chat_panel.add_message,
                         "system",
-                        f"⚠️ Error searching `{db_path}`: {str(e)}"
+                        f"{EMOJI['cross']} Error searching `{db_path}`: {str(e)}"
                     )
             
             # Combine all contexts

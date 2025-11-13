@@ -18,7 +18,7 @@ This TUI implementation includes all major features from the CLI version:
    - Shows progress indicators during reasoning phase
 
 ✅ Full Command Support:
-   - /clear, /new - Start new conversation
+   - /new - Start new conversation
    - /quit - Exit application
    - /help - Show comprehensive help
    - /model - Interactive model picker with arrow keys
@@ -132,7 +132,7 @@ import subprocess
 import hashlib
 import traceback
 
-# RAG Knowledge Base dependencies - optional imports
+# RAG database imports - optional dependencies
 try:
     import PyPDF2
 except ImportError:
@@ -150,9 +150,9 @@ except ImportError:
     chromadb = None
 
 try:
-    from docx import Document
+    from docx import Document as DocxDocument
 except ImportError:
-    Document = None
+    DocxDocument = None
 
 
 # Platform-specific emoji/symbol mapping
@@ -174,6 +174,7 @@ if IS_LINUX:
         'folder': '◨',
         'file': '◫',
         'keyboard': '⌨️ ',
+        'lightning': '⚡',
     }
 else:
     # Unicode emojis for Windows/Mac
@@ -189,6 +190,7 @@ else:
         'folder': '📁',
         'file': '📄',
         'keyboard': '⌨️',
+        'lightning': '⚡',
     }
 
 
@@ -1685,8 +1687,8 @@ class InlinePicker(OptionList):
     """Inline picker that temporarily replaces the textarea for selections."""
     
     BINDINGS = [
+        Binding("ctrl+d", "parent_agent_picker", "Agent", show=True, priority=True),
         Binding("ctrl+f", "parent_toggle_files", "Files", show=True, priority=True),
-        Binding("ctrl+b", "parent_agent_picker", "Agent", show=True, priority=True),
         Binding("ctrl+n", "parent_new_chat", "New Chat", show=True, priority=True),
         Binding("ctrl+o", "parent_change_model", "Model", show=True, priority=True),
         Binding("ctrl+s", "parent_save_session", "Save", show=True, priority=True),
@@ -1976,18 +1978,18 @@ class ContextChip(Container):
     ContextChip {
         width: auto;
         height: 1;
-        background: $surface;
-        border: solid white;
-        padding: 0 2;
-        margin: 0 1 0 0;
+        background: $panel;
+        padding: 0 1;
+        margin: 0 1 1 0;
         layout: horizontal;
         align: center middle;
     }
     
     ContextChip .chip-label {
-        color: $text;
-        text-style: none;
         width: auto;
+        height: 1;
+        color: $text;
+        content-align: left middle;
     }
     
     ContextChip .chip-remove-btn {
@@ -1997,14 +1999,16 @@ class ContextChip(Container):
         padding: 0;
         margin: 0 0 0 1;
         background: transparent;
-        color: $error;
+        color: $text;
         border: none;
         text-style: bold;
+        content-align: center middle;
     }
     
     ContextChip .chip-remove-btn:hover {
-        background: $error;
-        color: $text-bright;
+        color: $text;
+        background: transparent;
+        border: none;
     }
     """
     
@@ -2023,15 +2027,27 @@ class ContextChip(Container):
     def compose(self) -> ComposeResult:
         """Compose the chip with label and remove button."""
         # Determine icon based on type
-        icon = EMOJI['file'] if self.item_type == 'file' else EMOJI['folder']
+        if self.item_type == 'file':
+            icon = EMOJI['file']
+        elif self.item_type == 'folder':
+            icon = EMOJI['folder']
+        elif self.item_type == 'database':
+            icon = EMOJI['lightning']
+        else:
+            icon = EMOJI['file']  # Default fallback
+        
+        # Show basename for files, full name for databases
+        if self.item_type == 'file':
+            display_name = os.path.basename(self.item_name)
+        else:
+            display_name = self.item_name
         
         # Truncate long names
-        display_name = self.item_name
         if len(display_name) > 40:
             display_name = "..." + display_name[-37:]
         
         yield Static(f"{icon} {display_name}", classes="chip-label")
-        yield Button(EMOJI['cross'], classes="chip-remove-btn")
+        yield Button("✕", classes="chip-remove-btn")
     
     @on(Button.Pressed, ".chip-remove-btn")
     def remove_chip(self):
@@ -2047,25 +2063,26 @@ class ContextChipBar(Container):
         width: 100%;
         height: auto;
         max-height: 3;
-        background: $surface;
-        padding: 0 2;
+        background: transparent;
+        padding: 0;
         layout: horizontal;
         overflow-x: auto;
-        scrollbar-size: 0 0;
+        scrollbar-size: 1 0;
         dock: none;
         display: none;
     }
     
     ContextChipBar.visible {
         display: block;
-        padding: 1 2;
+        padding: 0 2;
+        margin-bottom: 0;
     }
     """
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.loaded_files = []
-        self.loaded_database = None
+        self.loaded_databases = []  # Changed from single to list
     
     def add_file(self, file_path: str):
         """Add a file chip to the bar."""
@@ -2077,14 +2094,12 @@ class ContextChipBar(Container):
     
     def add_database(self, db_path: str):
         """Add a database chip to the bar."""
-        # Remove existing database chip if any
-        if self.loaded_database:
-            self.remove_database()
-        
-        self.loaded_database = db_path
-        chip = ContextChip("database", db_path)
-        self.mount(chip)
-        self.add_class("visible")
+        # Add to list if not already present
+        if db_path not in self.loaded_databases:
+            self.loaded_databases.append(db_path)
+            chip = ContextChip("database", db_path)
+            self.mount(chip)
+            self.add_class("visible")
     
     def remove_file(self, file_path: str):
         """Remove a file chip from the bar."""
@@ -2098,29 +2113,37 @@ class ContextChipBar(Container):
                 break
         
         # Hide bar if empty
-        if not self.loaded_files and not self.loaded_database:
+        if not self.loaded_files and not self.loaded_databases:
             self.remove_class("visible")
     
-    def remove_database(self):
-        """Remove the database chip from the bar."""
-        if self.loaded_database:
-            db_path = self.loaded_database
-            self.loaded_database = None
+    def remove_database(self, db_path: str = None):
+        """Remove a specific database chip from the bar, or all if db_path is None."""
+        if db_path is None:
+            # Remove all databases
+            self.loaded_databases.clear()
+            # Remove all database chip widgets
+            for chip in list(self.query(ContextChip)):
+                if chip.item_type == "database":
+                    chip.remove()
+        else:
+            # Remove specific database
+            if db_path in self.loaded_databases:
+                self.loaded_databases.remove(db_path)
             
             # Find and remove the chip widget
             for chip in self.query(ContextChip):
                 if chip.item_type == "database" and chip.item_name == db_path:
                     chip.remove()
                     break
-            
-            # Hide bar if empty
-            if not self.loaded_files:
-                self.remove_class("visible")
+        
+        # Hide bar if empty
+        if not self.loaded_files and not self.loaded_databases:
+            self.remove_class("visible")
     
     def clear_all(self):
         """Clear all chips from the bar."""
         self.loaded_files.clear()
-        self.loaded_database = None
+        self.loaded_databases.clear()
         
         # Remove all chip widgets
         for chip in list(self.query(ContextChip)):
@@ -2133,8 +2156,8 @@ class MainScreen(Screen):
     """Main application screen with modern Material Design layout."""
     
     BINDINGS = [
+        Binding("ctrl+d", "agent_picker", "Agent", priority=True),
         Binding("ctrl+f", "toggle_files", "Files", priority=True),
-        Binding("ctrl+b", "agent_picker", "Agent", priority=True),
         Binding("ctrl+n", "new_chat", "New Chat", priority=True),
         Binding("ctrl+o", "change_model", "Model", priority=True),
         Binding("ctrl+s", "save_session", "Save", priority=True),
@@ -2301,16 +2324,21 @@ class MainScreen(Screen):
                 f"{EMOJI['checkmark']} Removed file from context: `{message.item_name}`")
         
         elif message.item_type == "database":
-            # Unload database
-            if hasattr(self.app, 'rag_kb'):
-                self.app.rag_kb = None
+            # Unload the specific database from the active RAG knowledge bases
+            if hasattr(self, '_active_rag_kb') and self._active_rag_kb is not None:
+                # _active_rag_kb is now a dict, remove this specific database
+                if isinstance(self._active_rag_kb, dict) and message.item_name in self._active_rag_kb:
+                    del self._active_rag_kb[message.item_name]
+                    # If dict is now empty, set to None
+                    if not self._active_rag_kb:
+                        self._active_rag_kb = None
             
             # Remove from chip bar
-            self._context_chip_bar.remove_database()
+            self._context_chip_bar.remove_database(message.item_name)
             
             # Show notification
             chat_panel.add_message("system", 
-                f"{EMOJI['checkmark']} Unloaded knowledge base: `{message.item_name}`")
+                f"{EMOJI['checkmark']} Unloaded database: `{message.item_name}`")
     
     def show_welcome_message(self):
         """Display the welcome message."""
@@ -2385,7 +2413,7 @@ Try:
             
         except Exception as e:
             chat_panel = self.query_one("#chat-panel", ChatPanel)
-            chat_panel.add_message("error", f"""## {EMOJI['cross']} Initialization Error
+            chat_panel.add_message("error", f"""### {EMOJI['cross']} Initialization Error
 
 Failed to initialize chatbot:
 
@@ -2404,7 +2432,6 @@ Please check your configuration and try again.
         builtin_commands = [
             ("/help", "Show help information"),
             ("/quit", "Exit the application"),
-            ("/clear", "Start a new conversation"),
             ("/new", "Start a new conversation"),
             ("/agent", "Select and run an agent workflow"),
             ("/model", "Change the AI model"),
@@ -2419,8 +2446,8 @@ Please check your configuration and try again.
             ("/update", "Check for and install updates from GitHub"),
             ("/add_agent", "Add agent information"),
             ("/add_tool", "Add tool information"),
-            ("/create_database", "Create a new RAG knowledge base from documents"),
-            ("/load_database", "Load an existing RAG knowledge base"),
+            ("/create_database", "Create a RAG database from documents"),
+            ("/load_database", "Load and query an existing database"),
         ]
         commands.extend(builtin_commands)
         
@@ -3046,7 +3073,7 @@ Please check your configuration and try again.
         
         elif cmd == "/reload":
             # Handle /reload BEFORE CommandManager to avoid blocking Confirm.ask()
-            chat_panel.add_message("system", """## ↻ Reload Configuration
+            chat_panel.add_message("system", """### ↻ Reload Configuration
 
 Restarting TUI to reload configuration...
 """)
@@ -3112,7 +3139,7 @@ Restarting TUI to reload configuration...
             await self.action_change_model()
             return
         
-        elif cmd == "/clear" or cmd == "/new":
+        elif cmd == "/new":
             # Override CLI's clear command to completely restart from scratch
             chat_panel.clear_messages()
             # Clear any streaming message reference
@@ -3120,6 +3147,13 @@ Restarting TUI to reload configuration...
                 self._streaming_msg = None
             if hasattr(self, '_last_code_block_count'):
                 del self._last_code_block_count
+            
+            # Unload any active RAG database
+            if hasattr(self, '_active_rag_kb') and self._active_rag_kb is not None:
+                self._active_rag_kb = None
+            
+            # Clear context chip bar
+            self._context_chip_bar.clear_all()
             
             # Completely reinitialize the chatbot (like quitting and relaunching)
             if self.chatbot:
@@ -3143,18 +3177,18 @@ Restarting TUI to reload configuration...
             return
             
         elif cmd == "/help":
-            chat_panel.add_message("system", """## ⌨️ ValBot Help
+            chat_panel.add_message("system", """### ⌨️ ValBot Help
 
 **Available Commands:**
 - `/agent` - Select and run an agent workflow
 - `/model` - Change the AI model
 - `/context <files>` - Load files into conversation context  
-- `/clear` or `/new` - Start a new conversation
+- `/new` - Start a new conversation
 - `/prompts` - Show available custom prompts
 - `/commands` - Show all available commands
 - `/settings` - Show settings (CLI mode only)
-- `/create_database <files> --output <folder>` - Create RAG knowledge base
-- `/load_database <folder>` - Load RAG knowledge base for document Q&A
+- `/create_database <folder> <files>` - Create a RAG database
+- `/load_database <folder1> [folder2] ...` - Load one or more databases
 - `/quit` - Exit the application
 
 **Usage Tips:**
@@ -3162,14 +3196,17 @@ Restarting TUI to reload configuration...
 - Use `/` prefix for commands
 - Agent workflows provide specialized functionality
 - Context files are remembered throughout conversation
-- Load a knowledge base to query your documents with AI
+- RAG databases enable Q&A with your documents
+- Load multiple databases with space-separated paths
+- Click ✕ on database chips to unload specific databases
+- Use `/new` to unload all databases and start fresh
 
 For more detailed help, try the CLI mode with `--help` flag.
 """)
             return
             
         elif cmd == "/settings":
-            chat_panel.add_message("system", """## {EMOJI['gear']} Settings
+            chat_panel.add_message("system", """### {EMOJI['gear']} Settings
 
 Settings management is available in CLI mode only.
 To modify settings, exit TUI and run:
@@ -3185,77 +3222,6 @@ Use `/model` to change the current model.
 """)
             return
         
-        elif cmd == "/create_database":
-            # Handle /create_database command
-            if not args:
-                chat_panel.add_message("system", f"""## {EMOJI['info']} Create Knowledge Base
-
-**Usage**: `/create_database <file_paths> --output <output_folder>`
-
-**Examples**:
-- `/create_database doc1.pdf,doc2.pdf --output ./kb_output`
-- `/create_database *.pdf --output ./my_knowledge_base`
-- `/create_database file.txt,doc.docx --output ./kb`
-
-**Supported file types**: PDF, DOCX, TXT, PDL, MD, PY, C, CPP, H
-
-**Arguments**:
-- `<file_paths>` - Comma-separated list of file paths or glob patterns
-- `--output <folder>` - Output folder for knowledge base (required)
-""")
-                return
-            
-            # Parse arguments
-            if '--output' not in args:
-                chat_panel.add_message("error", f"{EMOJI['cross']} Error: --output argument is required")
-                return
-            
-            parts = args.split('--output')
-            file_paths_str = parts[0].strip()
-            output_folder = parts[1].strip() if len(parts) > 1 else ""
-            
-            if not file_paths_str or not output_folder:
-                chat_panel.add_message("error", f"{EMOJI['cross']} Error: Both file paths and output folder are required")
-                return
-            
-            # Run in background thread
-            import threading
-            thread = threading.Thread(
-                target=self._create_database_in_thread,
-                args=(file_paths_str, output_folder),
-                daemon=True
-            )
-            thread.start()
-            return
-        
-        elif cmd == "/load_database":
-            # Handle /load_database command
-            if not args:
-                chat_panel.add_message("system", f"""## {EMOJI['info']} Load Knowledge Base
-
-**Usage**: `/load_database <directory_path>`
-
-**Example**:
-- `/load_database ./my_knowledge_base`
-- `/load_database C:/Users/Documents/kb_output`
-
-Load an existing knowledge base directory that was created with `/create_database`.
-After loading, you can query the knowledge base by chatting normally.
-""")
-                return
-            
-            kb_directory = args.strip()
-            
-            # Run in background thread
-            import threading
-            thread = threading.Thread(
-                target=self._load_database_in_thread,
-                args=(kb_directory,),
-                daemon=True
-            )
-            thread.start()
-            return
-            
         # Try to use CommandManager for standard commands
         if hasattr(self.chatbot, 'command_manager'):
             # Check if command exists in CommandManager
@@ -3265,7 +3231,7 @@ After loading, you can query the knowledge base by chatting normally.
                     self.chatbot.command_manager.handle_command(command)
                     return
                 except Exception as e:
-                    chat_panel.add_message("error", f"""## {EMOJI['cross']} Command Error
+                    chat_panel.add_message("error", f"""### {EMOJI['cross']} Command Error
 
 Error executing command `{cmd}`:
 
@@ -3279,10 +3245,10 @@ Error executing command `{cmd}`:
         if cmd == "/help":
             help_text = """# 📚 ValBot TUI Help
 
-## Available Commands
+### Available Commands
 
 ### Chat Management
-- `/new` or `/clear` - Start a new chat session
+- `/new` - Start a new chat session
 - `/quit` - Exit the application
 - `/prompts` - Show available custom prompts
 - `/commands` - Show all available commands
@@ -3299,24 +3265,25 @@ Error executing command `{cmd}`:
 - `/file <path>` - Display file content with syntax highlighting
   - Example: `/file ./config.py`
 
+### RAG database (Document Q&A)
+- `/create_database <folder> <files>` - Create a searchable database
+  - Example: `/create_database ./kb doc1.pdf doc2.txt notes.md`
+  - Supports: PDF, DOCX, TXT, MD, PDL, PY, C, CPP, H files
+  - Creates vector embeddings for semantic search
+- `/load_database <folder1> [folder2] ...` - Load one or more databases
+  - Example: `/load_database ./kb` - Load single database
+  - Example: `/load_database ./kb1 ./kb2 ./kb3` - Load multiple databases
+  - After loading, just ask questions normally in chat!
+  - System automatically searches all loaded databases and provides answers
+  - Click the ✕ button on a database chip to unload that specific database
+  - Use `/new` to unload all databases and return to normal chat
+
 ### Agent System (Advanced Workflows)
 - `/agent` - Run an agent flow (interactive selection with ↑/↓ keys)
   - Agents can perform complex multi-step tasks
   - Select from available agents like File Edit, Terminal, Spec Expert, etc.
 - `/add_agent <url_or_path>` - Add a new agent from git repo or local path
 - `/add_tool <url_or_path>` - Add a new tool from git repo or local path
-
-### RAG Knowledge Base (Document Q&A)
-- `/create_database <files> --output <folder>` - Create a knowledge base from documents
-  - Example: `/create_database doc1.pdf,doc2.pdf --output ./kb_output`
-  - Example: `/create_database *.pdf --output ./my_kb`
-  - Supports: PDF, DOCX, TXT, MD, PY, C, CPP, H, PDL files
-  - Creates vector embeddings for semantic search
-  - Uses ChromaDB for efficient retrieval
-- `/load_database <folder>` - Load an existing knowledge base
-  - Example: `/load_database ./my_kb`
-  - Once loaded, chat normally to query the documents
-  - AI automatically retrieves relevant context from your knowledge base
 
 ### System Integration
 - `/terminal <command>` - Execute a shell command
@@ -3336,12 +3303,12 @@ Error executing command `{cmd}`:
   - Handles git pull and requirements updates
   - Prompts before applying changes
 
-## {EMOJI['keyboard']} Keyboard Shortcuts
+### {EMOJI['keyboard']} Keyboard Shortcuts
 
 | Shortcut | Action | Description |
 |----------|--------|-------------|
+| **ctrl+d** | Agent | Select and run an agent workflow |
 | **ctrl+f** | Files | Toggle file explorer panel |
-| **ctrl+b** | Agent | Select and run an agent workflow |
 | **ctrl+n** | New Chat | Clear conversation and start fresh |
 | **ctrl+o** | Model | Open model picker dialog |
 | **ctrl+s** | Save | Save session (coming soon) |
@@ -3349,7 +3316,7 @@ Error executing command `{cmd}`:
 | **escape** | Cancel | Cancel current operation/close dialogs |
 | **ctrl+q** | Quit | Exit the application |
 
-## 💬 Chat Features
+### 💬 Chat Features
 
 - **Markdown Support**: Full markdown rendering with headers, lists, tables, quotes
 - **Code Highlighting**: Syntax-highlighted code blocks with copy buttons
@@ -3359,6 +3326,10 @@ Error executing command `{cmd}`:
   - Configure in `user_config.json`: `"display_reasoning": true`
   - Set effort level: `"reasoning_effort": "low|medium|high"`
 - **Context Awareness**: Maintains full conversation history
+- **RAG database**: Q&A with your documents using semantic search
+  - Create once, query anytime
+  - Supports multiple file formats
+  - Powered by vector embeddings and ChromaDB
 - **Agents**: Run complex agentic workflows for tasks like:
   - File editing
   - Terminal operations
@@ -3366,7 +3337,7 @@ Error executing command `{cmd}`:
   - Project scaffolding
   - And more!
 
-## 🎨 UI Features
+### 🎨 UI Features
 
 - **Material Design**: Modern, beautiful dark theme interface
 - **Gradient Accents**: Colorful borders and highlights
@@ -3378,7 +3349,7 @@ Error executing command `{cmd}`:
 - **Smooth Scrolling**: Elegant animations and transitions
 - **Interactive Dialogs**: Beautiful modal dialogs for selection tasks
 
-## 📚 Custom Prompts
+### 📚 Custom Prompts
 
 ValBot supports custom prompts defined in your config file. These are shortcuts for common tasks:
 
@@ -3400,7 +3371,7 @@ ValBot supports custom prompts defined in your config file. These are shortcuts 
 }
 ```
 
-## {EMOJI['robot']} Agent Plugins
+### {EMOJI['robot']} Agent Plugins
 
 Agents are powerful workflows that can perform complex tasks:
 
@@ -3418,7 +3389,7 @@ Agents are powerful workflows that can perform complex tasks:
 3. Press Enter to run
 4. Follow the agent's prompts
 
-## 🔧 Configuration Tips
+### 🔧 Configuration Tips
 
 Edit `user_config.json` to customize your experience:
 
@@ -3439,7 +3410,7 @@ Edit `user_config.json` to customize your experience:
 }
 ```
 
-## 🆘 Troubleshooting
+### 🆘 Troubleshooting
 
 **Q: Commands not working?**
 - Make sure command starts with `/`
@@ -3464,7 +3435,7 @@ Edit `user_config.json` to customize your experience:
 **Q: How do I exit?**
 - Press **Ctrl+Q** or type `/quit`
 
-## 📖 More Resources
+### 📖 More Resources
 
 - **Full Documentation**: See `README_TUI.md`
 - **Feature List**: See `TUI_FEATURES_IMPLEMENTED.md`
@@ -3481,7 +3452,7 @@ Need more help? Just ask ValBot directly!
             if args:
                 await chat_panel.add_terminal_output(args)
             else:
-                chat_panel.add_message("system", """## {EMOJI['keyboard']} Terminal Command
+                chat_panel.add_message("system", """### {EMOJI['keyboard']} Terminal Command
 
 **Usage**: `/terminal <command>`
 
@@ -3526,7 +3497,7 @@ Need more help? Just ask ValBot directly!
                             }
                             lang = lang_map.get(file_ext, 'text')
                             
-                            formatted_content = f"""## 📄 File: `{file_path}`
+                            formatted_content = f"""### 📄 File: `{file_path}`
 
 ```{lang}
 {content}
@@ -3567,7 +3538,7 @@ Need more help? Just ask ValBot directly!
                             self._context_chip_bar.add_file(file_path)
                         
                         file_list = "\n".join(f"- `{f}`" for f in files)
-                        chat_panel.add_message("system", f"""## 📂 Context Loaded
+                        chat_panel.add_message("system", f"""### 📂 Context Loaded
 
 Loaded {len(files)} file(s) into conversation context:
 
@@ -3580,7 +3551,7 @@ You can now ask questions about these files!
                 except Exception as e:
                     chat_panel.add_message("error", f"{EMOJI['cross']} Error loading context: {str(e)}")
             else:
-                chat_panel.add_message("system", """## 📂 Load Context
+                chat_panel.add_message("system", """### 📂 Load Context
 
 **Usage**: `/context <file_or_pattern>`
 
@@ -3592,7 +3563,7 @@ You can now ask questions about these files!
         
         elif cmd == "/multi":
             # Multi-line input using system editor
-            chat_panel.add_message("system", """## 📝 Multi-line Input
+            chat_panel.add_message("system", """### 📝 Multi-line Input
 
 Opening your default editor for multi-line input...
 
@@ -3629,8 +3600,61 @@ Default: vim (Linux/Mac) or notepad (Windows)
             except Exception as e:
                 chat_panel.add_message("error", f"{EMOJI['cross']} Error with multi-line input: {str(e)}")
         
+        elif cmd == "/create_database":
+            # Create a new RAG database
+            if not args:
+                chat_panel.add_message("system", """### 📚 Create RAG database
+
+**Usage**: `/create_database <output_folder> <file1> [file2] [file3] ...`
+
+**Example**:
+- `/create_database ./my_kb document1.pdf document2.docx notes.txt`
+- `/create_database C:/kb *.pdf *.txt`
+
+**Supported file types**: PDF, DOCX, TXT, MD, PDL, PY, C, CPP, H
+
+This will process your documents and create a searchable database with vector embeddings.
+The cache and database files will be stored in the output folder.
+**Note**: Source files are NOT copied - only the database cache is created.
+""")
+            else:
+                # Run in background thread
+                import threading
+                thread = threading.Thread(
+                    target=self._run_create_database_in_thread,
+                    args=(args,),
+                    daemon=True
+                )
+                thread.start()
+            return
+        
+        elif cmd == "/load_database":
+            # Load and query an existing RAG database
+            if not args:
+                chat_panel.add_message("system", """### 📚 Load RAG database
+
+**Usage**: `/load_database <kb_directory>`
+
+**Example**:
+- `/load_database ./my_kb`
+- `/load_database C:/Users/myuser/Documents/my_kb`
+
+This will load an existing database and allow you to ask questions about the documents.
+After loading, just type your questions normally in chat!
+""")
+            else:
+                # Run in background thread
+                import threading
+                thread = threading.Thread(
+                    target=self._run_load_database_in_thread,
+                    args=(args.strip(),),
+                    daemon=True
+                )
+                thread.start()
+            return
+        
         elif cmd == "/settings":
-            chat_panel.add_message("system", """## {EMOJI['gear']} Settings
+            chat_panel.add_message("system", """### {EMOJI['gear']} Settings
 
 The settings TUI is not yet available in this version.
 
@@ -3650,187 +3674,6 @@ You can manually edit your configuration file at:
         else:
             chat_panel.add_message("error", f"{EMOJI['cross']} Unknown command: `{cmd}`\n\nType `/help` for available commands.")
     
-    
-    def _create_database_in_thread(self, file_paths_str: str, output_folder: str):
-        """Create a knowledge base in a background thread."""
-        import asyncio
-        
-        # Set up event loop for this thread
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        chat_panel = self.query_one("#chat-panel", ChatPanel)
-        
-        try:
-            # Show progress message
-            self.call_from_thread(chat_panel.add_message, "system", 
-                f"{EMOJI['gear']} Creating knowledge base...\n\nThis may take several minutes depending on the number and size of files.")
-            
-            # Parse file paths (comma-separated)
-            file_paths = [path.strip() for path in file_paths_str.split(',') if path.strip()]
-            
-            # Expand glob patterns
-            expanded_paths = []
-            for pattern in file_paths:
-                matching_files = glob.glob(pattern, recursive=True)
-                if matching_files:
-                    expanded_paths.extend(matching_files)
-                else:
-                    # If no glob match, treat as literal path
-                    expanded_paths.append(pattern)
-            
-            if not expanded_paths:
-                self.call_from_thread(chat_panel.add_message, "error", 
-                    f"{EMOJI['cross']} No files found matching the provided patterns.")
-                return
-            
-            # Create output folder
-            output_path = Path(output_folder)
-            output_path.mkdir(parents=True, exist_ok=True)
-            
-            # Initialize RAG Knowledge Base
-            try:
-                rag_kb = RAGKnowledgeBase(
-                    pdf_dir=output_path,
-                    cache_dir=output_path / ".rag_cache",
-                    chunk_size=1000,
-                    chunk_overlap=200,
-                    collection_name="rag_knowledge_base"
-                )
-            except ImportError as e:
-                self.call_from_thread(chat_panel.add_message, "error", 
-                    f"{EMOJI['cross']} Missing dependencies: {str(e)}\n\nInstall with: `pip install chromadb sentence-transformers PyPDF2`")
-                return
-            except Exception as e:
-                self.call_from_thread(chat_panel.add_message, "error", 
-                    f"{EMOJI['cross']} Error initializing RAG system: {str(e)}")
-                return
-            
-            # Process each file
-            processed_count = 0
-            failed_count = 0
-            
-            for file_path_str in expanded_paths:
-                file_path = Path(file_path_str.strip())
-                
-                if not file_path.exists():
-                    failed_count += 1
-                    continue
-                
-                try:
-                    suffix = file_path.suffix.lower()
-                    
-                    # Copy file to output directory if not already there
-                    if file_path.parent != output_path:
-                        import shutil
-                        shutil.copy(file_path, output_path / file_path.name)
-                    
-                    if suffix == '.pdf':
-                        rag_kb.load_pdfs([file_path.name], force_reload=True)
-                    elif suffix == '.docx':
-                        rag_kb.load_docx_files([file_path.name], force_reload=True)
-                    elif suffix in ['.txt', '.pdl', '.md', '.py', '.c', '.cpp', '.h']:
-                        rag_kb.load_text_file(output_path / file_path.name, force_reload=True)
-                    else:
-                        self.call_from_thread(chat_panel.add_message, "system", 
-                            f"{EMOJI['info']} Skipping unsupported file type: {file_path.name} ({suffix})")
-                        failed_count += 1
-                        continue
-                    
-                    processed_count += 1
-                    
-                except Exception as e:
-                    self.call_from_thread(chat_panel.add_message, "error", 
-                        f"{EMOJI['cross']} Error processing {file_path.name}: {str(e)}")
-                    failed_count += 1
-            
-            # Get stats and display summary
-            stats = rag_kb.get_stats()
-            
-            summary = f"""## {EMOJI['checkmark']} Knowledge Base Created
-
-**Summary:**
-- Files processed: {processed_count}
-- Files failed: {failed_count}
-- Total chunks: {stats['total_chunks']}
-- Location: `{output_folder}`
-
-You can now load this knowledge base with:
-```
-/load_database {output_folder}
-```
-"""
-            self.call_from_thread(chat_panel.add_message, "system", summary)
-            
-        except Exception as e:
-            self.call_from_thread(chat_panel.add_message, "error", 
-                f"{EMOJI['cross']} Error creating knowledge base:\n\n```\n{str(e)}\n{traceback.format_exc()}\n```")
-    
-    def _load_database_in_thread(self, kb_directory: str):
-        """Load a knowledge base in a background thread."""
-        import asyncio
-        
-        # Set up event loop for this thread
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        chat_panel = self.query_one("#chat-panel", ChatPanel)
-        
-        try:
-            # Show progress message
-            self.call_from_thread(chat_panel.add_message, "system", 
-                f"{EMOJI['gear']} Loading knowledge base from `{kb_directory}`...")
-            
-            kb_path = Path(kb_directory)
-            
-            if not kb_path.exists():
-                self.call_from_thread(chat_panel.add_message, "error", 
-                    f"{EMOJI['cross']} Error: Directory does not exist: {kb_directory}")
-                return
-            
-            cache_dir = kb_path / ".rag_cache"
-            if not cache_dir.exists():
-                self.call_from_thread(chat_panel.add_message, "error", 
-                    f"{EMOJI['cross']} Error: No knowledge base cache found in {kb_directory}\n\nThis directory may not contain a valid knowledge base created with `/create_database`.")
-                return
-            
-            try:
-                self.app.rag_kb = RAGKnowledgeBase(
-                    pdf_dir=kb_path,
-                    cache_dir=cache_dir,
-                    chunk_size=1000,
-                    chunk_overlap=200,
-                    collection_name="rag_knowledge_base"
-                )
-                
-                stats = self.app.rag_kb.get_stats()
-                
-                # Add database to chip bar
-                self.call_from_thread(self._context_chip_bar.add_database, kb_directory)
-                
-                summary = f"""## {EMOJI['checkmark']} Knowledge Base Loaded
-
-**Statistics:**
-- Total chunks: {stats['total_chunks']}
-- Embedding model: {stats['embedding_model']}
-- Chunk size: {stats['chunk_size']}
-- Location: `{kb_directory}`
-
-You can now query the knowledge base by asking questions in the chat!
-The AI will automatically retrieve relevant context from your documents.
-"""
-                self.call_from_thread(chat_panel.add_message, "system", summary)
-                
-            except ImportError as e:
-                self.call_from_thread(chat_panel.add_message, "error", 
-                    f"{EMOJI['cross']} Missing dependencies: {str(e)}\n\nInstall with: `pip install chromadb sentence-transformers PyPDF2`")
-            except Exception as e:
-                self.call_from_thread(chat_panel.add_message, "error", 
-                    f"{EMOJI['cross']} Error loading knowledge base:\n\n```\n{str(e)}\n{traceback.format_exc()}\n```")
-                
-        except Exception as e:
-            self.call_from_thread(chat_panel.add_message, "error", 
-                f"{EMOJI['cross']} Error loading knowledge base:\n\n```\n{str(e)}\n{traceback.format_exc()}\n```")
     
     def _run_add_agent_in_thread(self, args: str):
         """Run /add_agent in a separate thread with monkey patches (not @work decorator)."""
@@ -4961,13 +4804,428 @@ The AI will automatically retrieve relevant context from your documents.
             except Exception:
                 pass
     
+    def _run_create_database_in_thread(self, args: str):
+        """Create a new RAG database (runs in background thread)."""
+        chat_panel = self.query_one("#chat-panel", ChatPanel)
+        
+        try:
+            # Parse arguments: first is output folder, rest are file paths
+            parts = args.split()
+            if len(parts) < 2:
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "error",
+                    f"{EMOJI['cross']} Invalid arguments. Usage: `/create_database <output_folder> <file1> [file2] ...`"
+                )
+                return
+            
+            output_folder = parts[0]
+            file_paths_input = parts[1:]
+            
+            # Show initial message
+            self.app.call_from_thread(
+                chat_panel.add_message,
+                "system",
+                f"""### {EMOJI['lightbulb']} Creating Database
+
+**Output folder**: `{output_folder}`
+**Input files**: {len(file_paths_input)} file(s)
+
+Processing documents..."""
+            )
+            
+            # Check dependencies
+            missing = []
+            if PyPDF2 is None:
+                missing.append("PyPDF2")
+            if SentenceTransformer is None:
+                missing.append("sentence-transformers")
+            if chromadb is None:
+                missing.append("chromadb")
+            
+            if missing:
+                error_msg = f"""### {EMOJI['cross']} Missing Dependencies
+
+The following packages are required but not installed:
+{chr(10).join(f'- `{pkg}`' for pkg in missing)}
+
+**Install with**:
+```bash
+pip install {' '.join(missing)}
+```"""
+                self.app.call_from_thread(chat_panel.add_message, "error", error_msg)
+                return
+            
+            # Create output folder
+            output_path = Path(output_folder)
+            output_path.mkdir(parents=True, exist_ok=True)
+            
+            # Initialize RAG database
+            from agent_plugins.agents.database_agent import RAGKnowledgeBase
+            
+            rag_kb = RAGKnowledgeBase(
+                pdf_dir=output_path,
+                cache_dir=output_path / ".rag_cache",
+                chunk_size=1000,
+                chunk_overlap=200,
+                collection_name="rag_knowledge_base"
+            )
+            
+            # Process each file
+            processed_count = 0
+            failed_count = 0
+            
+            for file_path_str in file_paths_input:
+                file_path = Path(file_path_str.strip())
+                
+                if not file_path.exists():
+                    self.app.call_from_thread(
+                        chat_panel.add_message,
+                        "system",
+                        f"{EMOJI['cross']} File not found: `{file_path}`"
+                    )
+                    failed_count += 1
+                    continue
+                
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "system",
+                    f"Processing: `{file_path.name}`..."
+                )
+                
+                try:
+                    suffix = file_path.suffix.lower()
+                    
+                    # Process file directly from its location (no copying needed)
+                    if suffix == '.pdf':
+                        rag_kb.load_pdfs([str(file_path)], force_reload=True)
+                    elif suffix == '.docx':
+                        rag_kb.load_docx_files([str(file_path)], force_reload=True)
+                    elif suffix in ['.txt', '.pdl', '.md', '.py', '.c', '.cpp', '.h']:
+                        rag_kb.load_text_file(file_path, force_reload=True)
+                    else:
+                        self.app.call_from_thread(
+                            chat_panel.add_message,
+                            "system",
+                            f"{EMOJI['cross']} Unsupported file type: `{suffix}`"
+                        )
+                        failed_count += 1
+                        continue
+                    
+                    processed_count += 1
+                    self.app.call_from_thread(
+                        chat_panel.add_message,
+                        "system",
+                        f"{EMOJI['checkmark']} Processed: `{file_path.name}`"
+                    )
+                    
+                except Exception as e:
+                    self.app.call_from_thread(
+                        chat_panel.add_message,
+                        "error",
+                        f"{EMOJI['cross']} Error processing `{file_path.name}`: {str(e)}"
+                    )
+                    failed_count += 1
+            
+            # Display summary
+            stats = rag_kb.get_stats()
+            summary = f"""### {EMOJI['checkmark']} Database Created
+
+**Summary**:
+- Files processed: {processed_count}
+- Files failed: {failed_count}
+- Total chunks: {stats['total_chunks']}
+- Embedding model: `{stats['embedding_model']}`
+- Location: `{output_folder}`
+
+You can now load this database with:
+```
+/load_database {output_folder}
+```"""
+            
+            self.app.call_from_thread(chat_panel.add_message, "system", summary)
+            
+        except Exception as e:
+            error_msg = f"""### {EMOJI['cross']} Error Creating database
+
+```
+{str(e)}
+```
+
+{traceback.format_exc()}"""
+            self.app.call_from_thread(chat_panel.add_message, "error", error_msg)
+    
+    def _run_load_database_in_thread(self, kb_directories: str):
+        """Load one or more existing RAG databases and enable Q&A mode (runs in background thread)."""
+        chat_panel = self.query_one("#chat-panel", ChatPanel)
+        
+        try:
+            # Parse space-separated database directories
+            db_paths = kb_directories.strip().split()
+            
+            if not db_paths:
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "error",
+                    f"{EMOJI['cross']} No database directories specified. Usage: `/load_database <dir1> [dir2] ...`"
+                )
+                return
+            
+            # Show initial message
+            self.app.call_from_thread(
+                chat_panel.add_message,
+                "system",
+                f"""### {EMOJI['lightbulb']} Loading Database(s)
+
+Loading {len(db_paths)} database(s)...
+
+Please wait..."""
+            )
+            
+            # Check dependencies
+            missing = []
+            if PyPDF2 is None:
+                missing.append("PyPDF2")
+            if SentenceTransformer is None:
+                missing.append("sentence-transformers")
+            if chromadb is None:
+                missing.append("chromadb")
+            
+            if missing:
+                error_msg = f"""### {EMOJI['cross']} Missing Dependencies
+
+The following packages are required but not installed:
+{chr(10).join(f'- `{pkg}`' for pkg in missing)}
+
+**Install with**:
+```bash
+pip install {' '.join(missing)}
+```"""
+                self.app.call_from_thread(chat_panel.add_message, "error", error_msg)
+                return
+            
+            # Initialize _active_rag_kb as dict if not already
+            if not hasattr(self, '_active_rag_kb') or self._active_rag_kb is None:
+                self._active_rag_kb = {}
+            elif not isinstance(self._active_rag_kb, dict):
+                # Convert old single instance to dict
+                self._active_rag_kb = {}
+            
+            # Import RAGKnowledgeBase
+            from agent_plugins.agents.database_agent import RAGKnowledgeBase
+            
+            # Track success/failure
+            loaded_count = 0
+            failed_count = 0
+            all_stats = []
+            
+            # Load each database
+            for kb_directory in db_paths:
+                kb_directory = kb_directory.strip()
+                
+                try:
+                    # Check if directory exists
+                    kb_path = Path(kb_directory)
+                    if not kb_path.exists():
+                        self.app.call_from_thread(
+                            chat_panel.add_message,
+                            "error",
+                            f"{EMOJI['cross']} Directory does not exist: `{kb_directory}`"
+                        )
+                        failed_count += 1
+                        continue
+                    
+                    cache_dir = kb_path / ".rag_cache"
+                    if not cache_dir.exists():
+                        self.app.call_from_thread(
+                            chat_panel.add_message,
+                            "error",
+                            f"{EMOJI['cross']} No database cache found in `{kb_directory}`\n\nThis directory may not contain a valid database."
+                        )
+                        failed_count += 1
+                        continue
+                    
+                    # Initialize RAG database
+                    rag_kb = RAGKnowledgeBase(
+                        pdf_dir=kb_path,
+                        cache_dir=cache_dir,
+                        chunk_size=1000,
+                        chunk_overlap=200,
+                        collection_name="rag_knowledge_base"
+                    )
+                    
+                    # Store in dictionary for query handling
+                    self._active_rag_kb[kb_directory] = rag_kb
+                    
+                    # Add database to chip bar
+                    self.app.call_from_thread(self._context_chip_bar.add_database, kb_directory)
+                    
+                    # Get stats
+                    stats = rag_kb.get_stats()
+                    stats['location'] = kb_directory
+                    all_stats.append(stats)
+                    
+                    loaded_count += 1
+                    
+                    self.app.call_from_thread(
+                        chat_panel.add_message,
+                        "system",
+                        f"{EMOJI['checkmark']} Loaded: `{kb_directory}` ({stats['total_chunks']} chunks)"
+                    )
+                    
+                except Exception as e:
+                    self.app.call_from_thread(
+                        chat_panel.add_message,
+                        "error",
+                        f"{EMOJI['cross']} Error loading `{kb_directory}`: {str(e)}"
+                    )
+                    failed_count += 1
+            
+            # Display summary
+            if loaded_count > 0:
+                # Build stats summary
+                stats_lines = []
+                for stats in all_stats:
+                    stats_lines.append(f"- `{stats['location']}`: {stats['total_chunks']} chunks")
+                
+                success_msg = f"""### {EMOJI['checkmark']} Database(s) Loaded
+
+**Summary**:
+- Successfully loaded: {loaded_count}
+- Failed: {failed_count}
+- Total chunks across all databases: {sum(s['total_chunks'] for s in all_stats)}
+
+**Loaded databases**:
+{chr(10).join(stats_lines)}
+
+**You can now ask questions about your documents!**
+
+Just type your questions normally in the chat. The system will automatically search all loaded databases and provide answers based on the document content.
+
+To unload a specific database, click the ✕ on its chip above.
+To unload all databases and return to normal chat, use `/new`.
+"""
+                
+                self.app.call_from_thread(chat_panel.add_message, "system", success_msg)
+            else:
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "error",
+                    f"{EMOJI['cross']} Failed to load any databases. Check the errors above."
+                )
+            
+        except Exception as e:
+            error_msg = f"""### {EMOJI['cross']} Error Loading Database
+
+```
+{str(e)}
+```
+
+{traceback.format_exc()}"""
+            self.app.call_from_thread(chat_panel.add_message, "error", error_msg)
+    
+    def _handle_rag_query(self, question: str, additional_context: str = ""):
+        """Handle a query to the RAG database(s) (runs in background thread).
+        
+        Args:
+            question: The user's question
+            additional_context: Optional additional context (e.g., from local files)
+        """
+        chat_panel = self.query_one("#chat-panel", ChatPanel)
+        
+        try:
+            # _active_rag_kb is now a dict of {db_path: RAGKnowledgeBase}
+            if not isinstance(self._active_rag_kb, dict) or not self._active_rag_kb:
+                # Fallback - shouldn't happen but just in case
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "error",
+                    f"{EMOJI['cross']} No databases loaded."
+                )
+                return
+            
+            num_dbs = len(self._active_rag_kb)
+            db_label = "database" if num_dbs == 1 else f"{num_dbs} databases"
+            
+            # Show that we're searching
+            self.app.call_from_thread(
+                chat_panel.add_message,
+                "system",
+                f"🔍 Searching {db_label}..."
+            )
+            
+            # Query all loaded databases and combine results
+            all_contexts = []
+            for db_path, rag_kb in self._active_rag_kb.items(): 
+                try:
+                    context = rag_kb.get_context_for_query(
+                        query=question,
+                        top_k=8,
+                        include_metadata=True
+                    )
+                    
+                    if context and context != "No relevant information found.":
+                        # Add database source to context
+                        all_contexts.append(f"### From database: {db_path}\n\n{context}")
+                except Exception as e:
+                    # Log error but continue with other databases
+                    self.app.call_from_thread(
+                        chat_panel.add_message,
+                        "system",
+                        f"⚠️ Error searching `{db_path}`: {str(e)}"
+                    )
+            
+            # Combine all contexts
+            if not all_contexts:
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "assistant",
+                    "I couldn't find any relevant information in the loaded databases for your question. Please try rephrasing or ask a different question."
+                )
+                return
+            
+            relevant_context = "\n\n---\n\n".join(all_contexts)
+            
+            # Add any additional context (e.g., from local files)
+            if additional_context:
+                relevant_context = f"{additional_context}\n\n---\n\n{relevant_context}"
+            
+            # Generate answer using the chatbot with the retrieved context
+            qa_prompt = f"""User Question: {question}
+
+Relevant Context from Documents:
+{relevant_context}
+
+Please answer the user's question based on the context above.
+Use proper Markdown formatting in your response.
+Cite sources when possible."""
+            
+            # Set processing state
+            self.app.call_from_thread(self._set_processing_state, True)
+            self.app.call_from_thread(self._add_loading_message)
+            
+            # Send the prompt to the chatbot
+            self._send_standard_message_sync(qa_prompt)
+            
+        except Exception as e:
+            error_msg = f"""### {EMOJI['cross']} Error Querying Database
+
+```
+{str(e)}
+```
+
+{traceback.format_exc()}"""
+            self.app.call_from_thread(chat_panel.add_message, "error", error_msg)
+        finally:
+            self.app.call_from_thread(self._set_processing_state, False)
+    
     def _send_chat_message_in_thread(self, message: str):
         """Send a message to the chatbot (runs in background thread)."""
         # Reset cancellation flag at the start of a new message
         self._cancel_streaming = False
         
         if not self.chatbot:
-            self.app.call_from_thread(self._add_error_message, f"""## {EMOJI['cross']} ChatBot Not Initialized
+            self.app.call_from_thread(self._add_error_message, f"""### {EMOJI['cross']} ChatBot Not Initialized
 
 ChatBot is not ready. Please check your configuration.
 
@@ -4978,39 +5236,82 @@ ChatBot is not ready. Please check your configuration.
 """)
             return
         
-        # Check if RAG knowledge base is loaded and augment the message with context
-        augmented_message = message
-        if self.app.rag_kb:
-            try:
-                # Retrieve relevant context from knowledge base
-                context = self.app.rag_kb.get_context_for_query(
-                    query=message,
-                    top_k=5,
-                    include_metadata=True
-                )
-                
-                if context and context != "No relevant information found.":
-                    # Augment the user's message with retrieved context
-                    augmented_message = f"""User Question: {message}
-
-Relevant Context from Knowledge Base:
-{context}
-
-Please answer the user's question based on the context above. If the context doesn't contain relevant information, let the user know."""
-                    
-                    # Show user that RAG is being used
-                    self.app.call_from_thread(
-                        lambda: self.query_one("#chat-panel", ChatPanel).add_message(
-                            "system", 
-                            f"{EMOJI['info']} Retrieved context from knowledge base..."
-                        )
-                    )
-            except Exception as e:
-                # Don't fail the entire request if RAG fails, just log it
-                import traceback
-                print(f"RAG retrieval error: {e}")
-                traceback.print_exc()
+        # Check if the message references local files first (always check this)
+        should_use_tools = False
+        detected_files = []
+        if self.chatbot.agent_model:
+            should_use_tools, detected_files = self.chatbot._should_use_tools(message)
             
+            # Add detected files to context chip bar
+            if detected_files:
+                for file_path in detected_files:
+                    self.app.call_from_thread(self._context_chip_bar.add_file, file_path)
+        
+        # Check if RAG database is active
+        has_active_database = hasattr(self, '_active_rag_kb') and self._active_rag_kb
+        
+        # If local files are detected AND database is active, combine both
+        if should_use_tools and has_active_database:
+            # Show indicator that we're loading files AND searching database
+            chat_panel = self.query_one("#chat-panel", ChatPanel)
+            num_files = len(detected_files)
+            file_word = "file" if num_files == 1 else "files"
+            num_dbs = len(self._active_rag_kb)
+            db_word = "database" if num_dbs == 1 else "databases"
+            
+            # Load the local files first to get their content
+            from pathlib import Path
+            file_contents = []
+            for file_path in detected_files:
+                try:
+                    path = Path(file_path)
+                    if path.exists() and path.is_file():
+                        content = path.read_text(encoding='utf-8', errors='ignore')
+                        file_contents.append(f"### Local File: {file_path}\n\n```\n{content}\n```")
+                except Exception as e:
+                    file_contents.append(f"### Local File: {file_path}\n\nError reading file: {str(e)}")
+            
+            # Combine file contents into additional context
+            additional_context = "\n\n---\n\n".join(file_contents) if file_contents else ""
+            
+            # Handle RAG query with additional local file context
+            self._handle_rag_query(message, additional_context)
+            return
+        
+        # If local files are detected but NO database, use tool-based processing
+        if should_use_tools:
+            # Set processing state in UI thread
+            self.app.call_from_thread(self._set_processing_state, True)
+            
+            # Add loading indicator in chat
+            self.app.call_from_thread(self._add_loading_message)
+            
+            try:
+                # Use tool-enabled agent to handle local files
+                self._send_with_tools(message)
+            except Exception as e:
+                # Remove loading indicator on error
+                self.app.call_from_thread(self._remove_loading_message)
+                
+                error_message = f"""### {EMOJI['cross']} Error
+
+An error occurred while processing your message:
+
+```
+{str(e)}
+```
+"""
+                self.app.call_from_thread(self._add_error_message, error_message)
+            finally:
+                # Reset processing state
+                self.app.call_from_thread(self._set_processing_state, False)
+            return
+        
+        # Check if RAG database is active (and no local files) - handle with RAG only
+        if has_active_database:
+            self._handle_rag_query(message)
+            return
+        
         # Set processing state in UI thread
         self.app.call_from_thread(self._set_processing_state, True)
         
@@ -5018,19 +5319,15 @@ Please answer the user's question based on the context above. If the context doe
         self.app.call_from_thread(self._add_loading_message)
         
         try:
-            # Check if the message should use tools
-            if self.chatbot.agent_model and self.chatbot._should_use_tools(augmented_message):
-                # Use tool-enabled agent (synchronous version to avoid event loop conflicts)
-                self._send_with_tools(augmented_message)
-            else:
-                # Use standard streaming chat (synchronous version)
-                self._send_standard_message_sync(augmented_message)
+            # No local files and no RAG - use standard chat
+            self._send_standard_message_sync(message)
                 
         except Exception as e:
+
             # Remove loading indicator on error
             self.app.call_from_thread(self._remove_loading_message)
             
-            error_message = f"""## {EMOJI['cross']} Error
+            error_message = f"""### {EMOJI['cross']} Error
 
 An error occurred while processing your message:
 
@@ -5193,7 +5490,7 @@ An error occurred while processing your message:
             # Remove loading indicator
             self.app.call_from_thread(self._remove_loading_message)
             
-            error_msg = f"""## ⚠️ Tool Error
+            error_msg = f"""### ⚠️ Tool Error
 
 Error using tools: {str(e)}
 
@@ -5321,7 +5618,7 @@ Falling back to standard chat...
             # Remove loading indicator on error
             self.app.call_from_thread(self._remove_loading_message)
             
-            response_text = f"""## {EMOJI['cross']} API Communication Error
+            response_text = f"""### {EMOJI['cross']} API Communication Error
 
 ```
 {str(e)}
@@ -5454,13 +5751,13 @@ Falling back to standard chat...
         # Clear messages (this should now catch any lingering agent messages)
         chat_panel.clear_messages()
         
+        # Unload any active RAG databases
+        if hasattr(self, '_active_rag_kb') and self._active_rag_kb is not None:
+            self._active_rag_kb = None
+        
         # Clear context chip bar
         if hasattr(self, '_context_chip_bar'):
             self._context_chip_bar.clear_all()
-        
-        # Unload any loaded database
-        if hasattr(self.app, 'rag_kb'):
-            self.app.rag_kb = None
         
         # Clear any streaming message reference
         if hasattr(self, '_streaming_msg'):
@@ -5645,563 +5942,6 @@ Falling back to standard chat...
             command_input.focus()
 
 
-# ================================
-# RAG Knowledge Base Implementation
-# ================================
-
-class RAGKnowledgeBase:
-    """
-    RAG-based knowledge base that uses vector embeddings and semantic search
-    to retrieve relevant information from documents.
-    """
-    
-    def __init__(
-        self,
-        pdf_dir: Path,
-        cache_dir: Optional[Path] = None,
-        embedding_model: str = "all-MiniLM-L6-v2",
-        chunk_size: int = 1000,
-        chunk_overlap: int = 200,
-        collection_name: str = "rag_knowledge_base"
-    ):
-        """
-        Initialize RAG Knowledge Base.
-        
-        Args:
-            pdf_dir: Directory containing documents
-            cache_dir: Directory for caching embeddings
-            embedding_model: HuggingFace model name for embeddings
-            chunk_size: Size of text chunks in characters
-            chunk_overlap: Overlap between chunks for context preservation
-            collection_name: Name of the ChromaDB collection
-        """
-        self.console = Console()
-        self.pdf_dir = Path(pdf_dir)
-        self.cache_dir = cache_dir or (self.pdf_dir / ".rag_cache")
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
-        self.embedding_model_name = embedding_model
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
-        self.collection_name = collection_name
-        
-        # Initialize components
-        self.embedding_model = None
-        self.chroma_client = None
-        self.collection = None
-        
-        # Check dependencies
-        self._check_dependencies()
-        
-        # Initialize models and database
-        self._initialize_components()
-    
-    def _check_dependencies(self):
-        """Check if required dependencies are installed."""
-        missing = []
-        
-        if PyPDF2 is None:
-            missing.append("PyPDF2")
-        if SentenceTransformer is None:
-            missing.append("sentence-transformers")
-        if chromadb is None:
-            missing.append("chromadb")
-        
-        if missing:
-            error_msg = f"Missing required packages: {', '.join(missing)}"
-            self.console.print(f"[bold red]Error: {error_msg}[/bold red]")
-            self.console.print("\n[yellow]Install with:[/yellow]")
-            self.console.print(f"  pip install {' '.join(missing)}")
-            raise ImportError(error_msg)
-    
-    def _initialize_components(self):
-        """Initialize embedding model and vector database."""
-        try:
-            # Initialize ChromaDB first to check if we have existing data
-            chroma_path = str(self.cache_dir / "chroma_db")
-            self.chroma_client = chromadb.PersistentClient(path=chroma_path)
-            
-            # Get or create collection
-            self.collection = self.chroma_client.get_or_create_collection(
-                name=self.collection_name,
-                metadata={"hnsw:space": "cosine"}
-            )
-            
-            # Check if we have existing embeddings
-            existing_count = self.collection.count()
-            is_new = existing_count == 0
-            
-            if is_new:
-                self.console.print("[dim]Initializing new knowledge base...[/dim]")
-            else:
-                self.console.print(f"[dim]Found existing knowledge base with {existing_count} chunks[/dim]")
-            
-            # Load embedding model
-            if is_new:
-                self.console.print("[dim]Loading embedding model (this may take a moment)...[/dim]")
-            self.embedding_model = SentenceTransformer(self.embedding_model_name)
-            if is_new:
-                self.console.print("[green]✓ Embedding model loaded[/green]")
-            
-        except Exception as e:
-            self.console.print(f"[red]Error initializing components: {e}[/red]")
-            raise
-    
-    def _get_pdf_hash(self, file_path: Path) -> str:
-        """Generate hash of file for caching."""
-        hash_obj = hashlib.md5()
-        with open(file_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                hash_obj.update(chunk)
-        return hash_obj.hexdigest()
-    
-    def extract_text_from_pdf(self, pdf_path: Path) -> str:
-        """Extract all text from a PDF file."""
-        try:
-            with open(pdf_path, 'rb') as file:
-                reader = PyPDF2.PdfReader(file)
-                text = ""
-                for page in reader.pages:
-                    text += page.extract_text() + "\n"
-                return text
-        except Exception as e:
-            self.console.print(f"[red]Error extracting text from {pdf_path.name}: {e}[/red]")
-            return ""
-    
-    def extract_text_from_docx(self, docx_path: Path) -> str:
-        """Extract all text from a .docx file."""
-        if Document is None:
-            self.console.print(f"[yellow]⚠ python-docx not installed. Install with: pip install python-docx[/yellow]")
-            return ""
-        
-        try:
-            doc = Document(str(docx_path))
-            text = ""
-            for paragraph in doc.paragraphs:
-                text += paragraph.text + "\n"
-            # Also extract text from tables
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        text += cell.text + " "
-                text += "\n"
-            return text
-        except Exception as e:
-            self.console.print(f"[red]Error extracting text from {docx_path.name}: {e}[/red]")
-            return ""
-    
-    def chunk_text(self, text: str, metadata: dict) -> List[dict]:
-        """Split text into overlapping chunks for better context preservation."""
-        chunks = []
-        start = 0
-        chunk_id = 0
-        
-        while start < len(text):
-            # Extract chunk
-            end = start + self.chunk_size
-            chunk_text = text[start:end]
-            
-            # Try to break at sentence boundary
-            if end < len(text):
-                last_period = chunk_text.rfind('.')
-                last_newline = chunk_text.rfind('\n')
-                break_point = max(last_period, last_newline)
-                
-                if break_point > self.chunk_size * 0.5:
-                    end = start + break_point + 1
-                    chunk_text = text[start:end]
-            
-            # Create chunk with metadata
-            chunk = {
-                'text': chunk_text.strip(),
-                'metadata': {
-                    **metadata,
-                    'chunk_id': chunk_id,
-                    'start_char': start,
-                    'end_char': end
-                }
-            }
-            
-            if chunk['text']:
-                chunks.append(chunk)
-                chunk_id += 1
-            
-            # Move to next chunk with overlap
-            start = end - self.chunk_overlap
-        
-        return chunks
-    
-    def load_text_file(self, file_path: Path, source_name: str = None, force_reload: bool = False):
-        """Load a text file into the vector database."""
-        if not file_path.exists():
-            self.console.print(f"[yellow]⚠[/yellow] File not found: {file_path}")
-            return
-        
-        source_name = source_name or file_path.name
-        
-        # Check if already processed
-        cache_file = self.cache_dir / "processed_docs.json"
-        processed_docs = {}
-        if cache_file.exists() and not force_reload:
-            with open(cache_file, 'r') as f:
-                processed_docs = json.load(f)
-            
-            # Check if file is already loaded
-            file_hash = self._get_pdf_hash(file_path)
-            if source_name in processed_docs and processed_docs[source_name] == file_hash:
-                self.console.print(f"[dim]Skipping {source_name} (already processed)[/dim]")
-                return
-        
-        # Read text file
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                text = f.read()
-        except Exception as e:
-            self.console.print(f"[red]Error reading {file_path.name}: {e}[/red]")
-            return
-        
-        if not text:
-            return
-        
-        # Create chunks
-        file_hash = self._get_pdf_hash(file_path)
-        metadata = {
-            'source': source_name,
-            'doc_hash': file_hash,
-            'file_type': 'text'
-        }
-        chunks = self.chunk_text(text, metadata)
-        
-        if chunks:
-            # Generate embeddings and store
-            texts = [chunk['text'] for chunk in chunks]
-            embeddings = self.embedding_model.encode(texts, show_progress_bar=False)
-            
-            # Prepare for ChromaDB
-            ids = [f"{source_name}_{chunk['metadata']['chunk_id']}" for chunk in chunks]
-            metadatas = [chunk['metadata'] for chunk in chunks]
-            
-            # Add to collection
-            self.collection.add(
-                ids=ids,
-                embeddings=embeddings.tolist(),
-                documents=texts,
-                metadatas=metadatas
-            )
-            
-            # Update processed docs cache
-            processed_docs[source_name] = file_hash
-            with open(cache_file, 'w') as f:
-                json.dump(processed_docs, f, indent=2)
-    
-    def load_pdfs(self, pdf_files: Optional[List[str]] = None, force_reload: bool = False):
-        """Load and process PDF files into the vector database."""
-        from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
-        
-        # Check if knowledge base is already fully loaded
-        if not force_reload:
-            existing_count = self.collection.count()
-            cache_file = self.cache_dir / "processed_docs.json"
-            
-            if existing_count > 0 and cache_file.exists():
-                self.console.print(f"[dim]Knowledge base already loaded ({existing_count} chunks)[/dim]")
-        
-        # Find PDF files
-        if pdf_files is None:
-            pdf_paths = list(self.pdf_dir.glob("*.pdf"))
-        else:
-            pdf_paths = [self.pdf_dir / pdf for pdf in pdf_files]
-        
-        if not pdf_paths:
-            self.console.print("[yellow]No PDF files found[/yellow]")
-            return
-        
-        self.console.print(f"\n[bold cyan]Loading {len(pdf_paths)} PDF(s) into RAG Knowledge Base[/bold cyan]")
-        
-        # Track processed documents
-        cache_file = self.cache_dir / "processed_docs.json"
-        processed_docs = {}
-        
-        if cache_file.exists() and not force_reload:
-            with open(cache_file, 'r') as f:
-                processed_docs = json.load(f)
-        
-        all_chunks = []
-        total_chunks = 0
-        
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            console=self.console
-        ) as progress:
-            
-            task = progress.add_task("[cyan]Processing PDFs...", total=len(pdf_paths))
-            
-            for pdf_path in pdf_paths:
-                if not pdf_path.exists():
-                    progress.update(task, advance=1)
-                    continue
-                
-                # Check if already processed
-                pdf_hash = self._get_pdf_hash(pdf_path)
-                if not force_reload and pdf_path.name in processed_docs:
-                    if processed_docs[pdf_path.name] == pdf_hash:
-                        progress.update(task, advance=1, description=f"[dim]Skipping {pdf_path.name} (cached)[/dim]")
-                        continue
-                
-                progress.update(task, description=f"[cyan]Processing {pdf_path.name}...[/cyan]")
-                
-                # Extract text
-                text = self.extract_text_from_pdf(pdf_path)
-                
-                if text:
-                    # Create chunks
-                    metadata = {
-                        'source': pdf_path.name,
-                        'doc_hash': pdf_hash,
-                        'file_type': 'pdf'
-                    }
-                    chunks = self.chunk_text(text, metadata)
-                    all_chunks.extend(chunks)
-                    total_chunks += len(chunks)
-                    processed_docs[pdf_path.name] = pdf_hash
-                
-                progress.update(task, advance=1)
-        
-        # Generate embeddings and store in ChromaDB
-        if all_chunks:
-            self.console.print(f"\n[yellow]Generating embeddings for {total_chunks} chunks...[/yellow]")
-            
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                console=self.console
-            ) as progress:
-                
-                task = progress.add_task("[cyan]Creating embeddings...", total=total_chunks)
-                
-                # Process in batches
-                batch_size = 32
-                for i in range(0, len(all_chunks), batch_size):
-                    batch = all_chunks[i:i + batch_size]
-                    texts = [chunk['text'] for chunk in batch]
-                    embeddings = self.embedding_model.encode(texts, show_progress_bar=False)
-                    
-                    # Prepare for ChromaDB
-                    ids = [f"{chunk['metadata']['source']}_{chunk['metadata']['chunk_id']}" for chunk in batch]
-                    metadatas = [chunk['metadata'] for chunk in batch]
-                    
-                    # Add to collection
-                    self.collection.add(
-                        ids=ids,
-                        embeddings=embeddings.tolist(),
-                        documents=texts,
-                        metadatas=metadatas
-                    )
-                    
-                    progress.update(task, advance=len(batch))
-            
-            # Save processed documents cache
-            with open(cache_file, 'w') as f:
-                json.dump(processed_docs, f, indent=2)
-            
-            self.console.print(f"[green]✓ Successfully loaded {total_chunks} chunks into vector database[/green]")
-        else:
-            self.console.print("[yellow]No chunks to process[/yellow]")
-    
-    def load_docx_files(self, docx_files: Optional[List[str]] = None, force_reload: bool = False):
-        """Load and process .docx files into the vector database."""
-        from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
-        
-        if Document is None:
-            self.console.print(f"[yellow]⚠ python-docx not installed. Skipping .docx files. Install with: pip install python-docx[/yellow]")
-            return
-        
-        # Find .docx files
-        if docx_files is None:
-            docx_paths = list(self.pdf_dir.glob("*.docx"))
-        else:
-            docx_paths = [self.pdf_dir / docx for docx in docx_files]
-        
-        if not docx_paths:
-            self.console.print("[yellow]No .docx files found[/yellow]")
-            return
-        
-        self.console.print(f"\n[bold cyan]Loading {len(docx_paths)} .docx file(s) into RAG Knowledge Base[/bold cyan]")
-        
-        # Track processed documents
-        cache_file = self.cache_dir / "processed_docs.json"
-        processed_docs = {}
-        
-        if cache_file.exists() and not force_reload:
-            with open(cache_file, 'r') as f:
-                processed_docs = json.load(f)
-        
-        all_chunks = []
-        total_chunks = 0
-        
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            console=self.console
-        ) as progress:
-            
-            task = progress.add_task("[cyan]Processing .docx files...", total=len(docx_paths))
-            
-            for docx_path in docx_paths:
-                if not docx_path.exists():
-                    progress.update(task, advance=1)
-                    continue
-                
-                # Check if already processed
-                docx_hash = self._get_pdf_hash(docx_path)
-                if not force_reload and docx_path.name in processed_docs:
-                    if processed_docs[docx_path.name] == docx_hash:
-                        progress.update(task, advance=1, description=f"[dim]Skipping {docx_path.name} (cached)[/dim]")
-                        continue
-                
-                progress.update(task, description=f"[cyan]Processing {docx_path.name}...[/cyan]")
-                
-                # Extract text
-                text = self.extract_text_from_docx(docx_path)
-                
-                if text:
-                    # Create chunks
-                    metadata = {
-                        'source': docx_path.name,
-                        'doc_hash': docx_hash,
-                        'file_type': 'docx'
-                    }
-                    chunks = self.chunk_text(text, metadata)
-                    all_chunks.extend(chunks)
-                    total_chunks += len(chunks)
-                    processed_docs[docx_path.name] = docx_hash
-                
-                progress.update(task, advance=1)
-        
-        # Generate embeddings and store in ChromaDB
-        if all_chunks:
-            self.console.print(f"\n[yellow]Generating embeddings for {total_chunks} chunks...[/yellow]")
-            
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                console=self.console
-            ) as progress:
-                
-                task = progress.add_task("[cyan]Creating embeddings...", total=total_chunks)
-                
-                # Process in batches
-                batch_size = 32
-                for i in range(0, len(all_chunks), batch_size):
-                    batch = all_chunks[i:i + batch_size]
-                    texts = [chunk['text'] for chunk in batch]
-                    embeddings = self.embedding_model.encode(texts, show_progress_bar=False)
-                    
-                    # Prepare for ChromaDB
-                    ids = [f"{chunk['metadata']['source']}_{chunk['metadata']['chunk_id']}" for chunk in batch]
-                    metadatas = [chunk['metadata'] for chunk in batch]
-                    
-                    # Add to collection
-                    self.collection.add(
-                        ids=ids,
-                        embeddings=embeddings.tolist(),
-                        documents=texts,
-                        metadatas=metadatas
-                    )
-                    
-                    progress.update(task, advance=len(batch))
-            
-            # Save processed documents cache
-            with open(cache_file, 'w') as f:
-                json.dump(processed_docs, f, indent=2)
-            
-            self.console.print(f"[green]✓ Successfully loaded {total_chunks} chunks into vector database[/green]")
-        else:
-            self.console.print("[yellow]No chunks to process[/yellow]")
-    
-    def retrieve_relevant_context(
-        self, 
-        query: str, 
-        top_k: int = 5,
-        min_similarity: float = 0.0
-    ) -> List[dict]:
-        """Retrieve the most relevant text chunks for a given query."""
-        try:
-            # Generate query embedding
-            query_embedding = self.embedding_model.encode([query])[0]
-            
-            # Search in ChromaDB
-            results = self.collection.query(
-                query_embeddings=[query_embedding.tolist()],
-                n_results=top_k
-            )
-            
-            # Format results
-            chunks = []
-            if results['documents'] and results['documents'][0]:
-                for i, doc in enumerate(results['documents'][0]):
-                    metadata = results['metadatas'][0][i] if results['metadatas'] else {}
-                    distance = results['distances'][0][i] if results['distances'] else 0
-                    similarity = 1 - distance  # Convert distance to similarity
-                    
-                    if similarity >= min_similarity:
-                        chunks.append({
-                            'text': doc,
-                            'metadata': metadata,
-                            'similarity': similarity
-                        })
-            
-            return chunks
-        
-        except Exception as e:
-            self.console.print(f"[red]Error retrieving context: {e}[/red]")
-            return []
-    
-    def get_context_for_query(
-        self, 
-        query: str, 
-        top_k: int = 5,
-        include_metadata: bool = False
-    ) -> str:
-        """Get formatted context string for a query."""
-        chunks = self.retrieve_relevant_context(query, top_k=top_k)
-        
-        if not chunks:
-            return "No relevant information found."
-        
-        context_parts = []
-        for chunk in chunks:
-            if include_metadata:
-                source = chunk['metadata'].get('source', 'Unknown')
-                similarity = chunk['metadata'].get('similarity', 0)
-                context_parts.append(f"[Source: {source} | Relevance: {similarity:.2%}]\n{chunk['text']}")
-            else:
-                context_parts.append(chunk['text'])
-        
-        return "\n\n---\n\n".join(context_parts)
-    
-    def get_stats(self) -> dict:
-        """Get statistics about the knowledge base."""
-        count = self.collection.count()
-        
-        return {
-            "total_chunks": count,
-            "embedding_model": self.embedding_model_name,
-            "chunk_size": self.chunk_size,
-            "chunk_overlap": self.chunk_overlap,
-            "cache_dir": str(self.cache_dir)
-        }
-
-
 class ValbotTUI(App):
     """ValBot Terminal User Interface with Material Design."""
     
@@ -6277,8 +6017,6 @@ class ValbotTUI(App):
         utilities.set_config_manager(self.config_manager)
         self.should_restart = False  # Flag to trigger restart
         self.should_update = False  # Flag to trigger updater
-        # Initialize RAG knowledge base (will be loaded when /load_database is used)
-        self.rag_kb = None
         # Register and use the custom valbot-dark theme
         self.register_theme(VALBOT_DARK_THEME)
         

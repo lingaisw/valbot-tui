@@ -176,8 +176,12 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
         self.console.print(f"Chatting with: {self.modelname} (/model to change models)\n")
         self.context_manager.conversation_history.append({"role": "system", "content": self.config_manager.get_setting("chat_model_config.system_prompt", "You are a helpful assistant. Prioritize markdown format and code blocks when applicable.")})
 
-    def _should_use_tools(self, message: str) -> bool:
-        """Determine if a message should use the tool-enabled agent."""
+    def _should_use_tools(self, message: str) -> tuple[bool, list[str]]:
+        """Determine if a message should use the tool-enabled agent.
+        
+        Returns:
+            tuple: (should_use_tools: bool, detected_files: list[str])
+        """
         message_lower = message.lower()
         
         # Check for valid file paths in the message
@@ -215,16 +219,16 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
             files_str = ", ".join([f"[bold]{f}[/bold]" for f in valid_files])
             file_word = "file" if len(valid_files) == 1 else "files"
             self.console.print(f"Found local {file_word}: {files_str}")
-            return True
+            return True, valid_files
         
         # Keywords that suggest directory/file listing operations
         directory_keywords = ['list files', 'show files', 'ls ', 'dir ', 'file tree', 
                              'directory structure', 'show tree', 'list all', 'show all']
         if any(keyword in message_lower for keyword in directory_keywords):
             self.console.print(f"[dim]→ Using tools (directory operation)[/dim]")
-            return True
+            return True, []
         
-        return False
+        return False, []
     
     async def send_message_with_tools(self, message: str):
         """Send a message using the tool-enabled pydantic-ai agent."""
@@ -405,12 +409,17 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
             self.command_manager.handle_command(input)
         else:
             # Check if the message should use tools
-            if self.agent_model and self._should_use_tools(input):
-                # Use async agent with tools
-                import asyncio
-                asyncio.run(self.send_message_with_tools(input))
+            if self.agent_model:
+                should_use_tools, detected_files = self._should_use_tools(input)
+                if should_use_tools:
+                    # Use async agent with tools
+                    import asyncio
+                    asyncio.run(self.send_message_with_tools(input))
+                else:
+                    # Use standard streaming chat
+                    self.send_message(input)
             else:
-                # Use standard streaming chat
+                # No agent model, use standard chat
                 self.send_message(input)
 
     @CommandManager.register_command('/multi')

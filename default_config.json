@@ -20,11 +20,6 @@
     "reasoning_effort": "low"
   },
   "default_agents":[
-      { 
-      "name": "Database Agent",
-      "description": "Create/Load your own RAG database of documents to chat with",
-      "location": "./agent_plugins/agents/database_agent.py"
-    },
     { 
       "name": "PDL Expert",
       "description": "Q&A with PDL Expert",

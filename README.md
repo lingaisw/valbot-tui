@@ -12,7 +12,8 @@ ValBot TUI is a powerful, extensible AI assistant with a beautiful Terminal User
 - **🔌 Extensible Plugin System**: Add custom agents from local files or Git repositories, create your own agents, and share them with others
 - **⚙️ Flexible Configuration**: Customize models, prompts, commands, and agent behaviors to match your workflow
 - **🔄 Built-in Updates**: Keep ValBot and installed plugins up to date with the `/update` command
-- **📝 Context Management**: Load conversation context from files to give the AI deep understanding of your codebase
+- **📝 Context Management**: Visual chip bar for easy management of loaded files and databases with one-click removal
+- **📚 RAG Knowledge Bases**: Create and query custom document databases for intelligent Q&A with PDFs, DOCX, code files, and more
 - **⌨️ Keyboard-Driven Workflow**: Extensive keyboard shortcuts and command palette for efficient navigation
 
 ---
@@ -447,6 +448,8 @@ ValBot's primary interface is a beautiful, feature-rich Terminal User Interface 
 - **Visual and Intuitive**: Beautiful Material Design interface with real-time message streaming, clear message organization, and instant visual feedback
 - **Intelligent Autocomplete**: Smart command and file path autocomplete with fuzzy matching—type `/` for command suggestions or start typing file paths for automatic completion
 - **Integrated Tools**: Built-in terminal panel and interactive file explorer eliminate context switching—execute commands and browse files without leaving the chat
+- **Context Management**: Visual chip bar displays all loaded files and databases—click to remove individual items without typing commands
+- **RAG Knowledge Bases**: Create and query custom document databases for intelligent Q&A with your PDFs, docs, and code
 - **Enhanced Productivity**: Extensive keyboard shortcuts, multi-line input support, command history, and session management streamline your workflow
 - **Superior Code Experience**: Syntax-highlighted code blocks with one-click copy buttons, full markdown rendering with tables/lists/quotes, and collapsible sections
 - **Customizable Interface**: Multiple theme support with Material Design colors, adjustable panel layouts, and personalized keyboard bindings
@@ -500,7 +503,7 @@ ValBot's primary interface is a beautiful, feature-rich Terminal User Interface 
 - **Toggle with hotkey**: Press `Ctrl+T` to show/hide terminal panel and maximize workspace
 - **Background execution**: Terminal panel updates while you continue chatting
 
-📁 **File System Integration**
+📁 **File System Integration & Context Management**
 - **Interactive file explorer**: Built-in DirectoryTree widget with expandable folders
 - **Full navigation controls**: Back/forward history, up directory, refresh, and address bar
   - **Browser-style navigation**: Navigate with ← Back, → Forward, ↑ Up buttons
@@ -523,6 +526,41 @@ ValBot's primary interface is a beautiful, feature-rich Terminal User Interface 
   - Prevents memory issues with large files
   - Shows file size warnings before loading
   - Reads files in 8KB chunks for efficiency
+- **Context chip bar**: Visual indicator showing all loaded files and databases
+  - **File chips**: Display loaded context files with file icon
+  - **Database chips**: Display loaded RAG databases with lightning icon
+  - **One-click removal**: Click ✕ on any chip to remove from context
+  - **Persistent display**: Always visible when files or databases are loaded
+  - **Smart truncation**: Long file names are intelligently shortened
+
+📚 **RAG Database - Document Q&A System**
+- **Create custom knowledge bases**: Process documents into searchable vector databases
+  - **Command**: `/create_database <output_folder> <file1> [file2] ...`
+  - **Supported formats**: PDF, DOCX, TXT, MD, PDL, PY, C, CPP, H files
+  - **Vector embeddings**: Uses sentence-transformers for semantic search
+  - **ChromaDB backend**: Efficient vector storage and retrieval
+  - **Chunking strategy**: Configurable chunk size (1000 tokens) with overlap (200 tokens)
+  - **Progress tracking**: Real-time feedback on document processing
+  - **No file copying**: Source files remain in original location, only database cache created
+- **Load and query databases**: Enable Q&A mode with your custom knowledge bases
+  - **Command**: `/load_database <kb_dir1> [kb_dir2] [kb_dir3]`
+  - **Multiple databases**: Load multiple knowledge bases simultaneously
+  - **Automatic context injection**: Questions are automatically enhanced with relevant context
+  - **Semantic search**: Finds relevant information even with different wording
+  - **Source attribution**: Answers include which documents were referenced
+  - **Visual indicators**: Database chips show all loaded knowledge bases
+  - **Selective unloading**: Click ✕ on database chip to unload specific database
+  - **Full reset**: Use `/new` to unload all databases and return to normal chat
+- **Intelligent query handling**: Seamlessly switches between RAG and normal chat
+  - **Context-aware**: System automatically searches databases when loaded
+  - **Top-K retrieval**: Configurable number of relevant chunks (default: 5)
+  - **Relevance scoring**: Uses similarity scores to rank results
+  - **Fallback**: If no relevant info found, AI responds without RAG context
+- **Database statistics**: View detailed information about loaded knowledge bases
+  - **Total chunks**: Number of document segments in database
+  - **Embedding model**: Which model is used for vector generation
+  - **Cache location**: Where database files are stored
+  - **Multiple database summary**: Combined statistics when multiple DBs loaded
 
 ⌨️ **Keyboard Shortcuts & Navigation**
 - **`Ctrl+Q`** - Quit application gracefully
@@ -550,11 +588,12 @@ ValBot's primary interface is a beautiful, feature-rich Terminal User Interface 
 - **Keyboard navigation**: Use arrow keys to select, Enter to accept, Esc to dismiss
 
 ✅ **Complete Feature Parity with CLI**
-- **All slash commands**: `/clear`, `/new`, `/help`, `/quit`, `/model`, `/agent`, `/context`, `/file`, `/terminal`, `/multi`, `/prompts`, `/commands`, `/settings`, `/reload`, `/update`, `/add_agent`, `/add_tool`
+- **All slash commands**: `/clear`, `/new`, `/help`, `/quit`, `/model`, `/agent`, `/context`, `/file`, `/terminal`, `/multi`, `/prompts`, `/commands`, `/settings`, `/reload`, `/update`, `/add_agent`, `/add_tool`, `/create_database`, `/load_database`
 - **CommandManager integration**: Full support for custom prompts with argument parsing and validation
 - **Custom commands**: From agent plugins with automatic delegation to plugin manager
 - **Agent system**: Interactive agent picker with arrow navigation, full descriptions, and real-time workflow execution
 - **Context management**: Complete ContextManager integration with visual confirmation and file previews
+- **RAG database system**: Create and query custom knowledge bases from documents (PDF, DOCX, TXT, MD, etc.)
 - **System prompt**: Automatically loads `system_prompt` from config on startup for consistent behavior
 - **GPT-5 reasoning**: Displays thinking process with configurable effort levels in dedicated panel
 - **Tool integration**: All common tools (ask_human, file_tools, git_tools, github_tools, terminal_tools, hsd_tools)
@@ -621,12 +660,38 @@ All CLI commands are fully supported in the TUI with enhanced visual feedback an
   - Visual feedback showing loaded files with count and size
   - File content preview with syntax highlighting
   - Shows which files were successfully loaded vs skipped
+  - Loaded files appear as chips in context chip bar
+  - Click ✕ on file chip to remove from context
 - `/file <path>` - Display file contents with syntax highlighting and autocomplete
   - **File path autocomplete** helps you find files quickly
   - Shows file in a beautifully formatted panel
   - Automatic language detection for 50+ languages
   - Syntax highlighting for better readability
   - Line numbers and file metadata displayed
+
+**RAG Database Commands:**
+- `/create_database <folder> <files>` - Create a searchable knowledge base from documents
+  - **Usage**: `/create_database <output_folder> <file1> [file2] [file3] ...`
+  - **Supported formats**: PDF, DOCX, TXT, MD, PDL, PY, C, CPP, H
+  - **Example**: `/create_database ./my_kb document1.pdf notes.txt spec.md`
+  - **Example with wildcards**: `/create_database ./kb *.pdf *.docx`
+  - Creates vector embeddings for semantic search
+  - Shows real-time progress as files are processed
+  - Displays statistics: total chunks, embedding model, location
+  - Source files remain in place (not copied)
+  - Database cache stored in `<output_folder>/.rag_cache`
+- `/load_database <folders>` - Load one or more knowledge bases for Q&A
+  - **Usage**: `/load_database <kb_dir1> [kb_dir2] [kb_dir3] ...`
+  - **Example (single)**: `/load_database ./my_kb`
+  - **Example (multiple)**: `/load_database ./kb1 ./kb2 ./kb3`
+  - Loads existing databases created with `/create_database`
+  - Supports loading multiple databases simultaneously
+  - All loaded databases are searched when you ask questions
+  - Loaded databases appear as chips in context chip bar
+  - Click ✕ on database chip to unload that specific database
+  - Use `/new` to unload all databases and return to normal chat
+  - After loading, just ask questions normally - AI automatically searches databases
+  - Shows combined statistics from all loaded databases
 
 **Terminal Commands:**
 - `/terminal <command>` - Execute shell commands in integrated terminal panel
@@ -767,8 +832,40 @@ You can switch models interactively in the TUI using `Ctrl+M` or `/model` comman
 ```
 1. Type: /context src/**/*.py
 2. See visual confirmation of loaded files
-3. Ask questions about the code
-4. Files remain in context for the conversation
+3. Loaded files appear as chips in the context chip bar
+4. Ask questions about the code
+5. Files remain in context for the conversation
+6. Click ✕ on any file chip to remove from context
+```
+
+**Creating a RAG Knowledge Base:**
+```
+1. Type: /create_database ./my_kb document1.pdf document2.docx notes.txt
+2. Watch real-time progress as documents are processed
+3. System creates vector embeddings and database cache
+4. See completion summary with statistics
+5. Database ready to load and query
+```
+
+**Querying a Knowledge Base:**
+```
+1. Type: /load_database ./my_kb
+2. Database loads and appears as chip in context chip bar
+3. Ask questions normally: "What does the spec say about authentication?"
+4. AI automatically searches database and provides answers with sources
+5. Load multiple databases: /load_database ./kb1 ./kb2 ./kb3
+6. Click ✕ on database chip to unload specific database
+7. Use /new to unload all databases and return to normal chat
+```
+
+**Context Management with Chips:**
+```
+1. Load files: /context config.py utils.py
+2. Load database: /load_database ./kb
+3. See all loaded context as chips at top of chat
+4. File chips show 📄 icon, database chips show ⚡ icon
+5. Click ✕ on any chip to remove from context
+6. Visual indicator always shows what's in context
 ```
 
 **Integrated Terminal:**
@@ -809,21 +906,45 @@ You can switch models interactively in the TUI using `Ctrl+M` or `/model` comman
   - `gpt-4.1-mini` or `gpt-5-mini` for simple queries
   - `gpt-4.1` or `gpt-5` for complex reasoning
 - Enable reasoning display only when needed (config: `display_reasoning: true`)
+- Unload unused databases by clicking ✕ on database chips
+- Use `/new` to completely reset context and free memory
 
-**3. Keyboard Shortcuts Workflow**
+**3. Context Management Best Practices**
+- **Visual tracking**: Context chip bar shows all loaded files and databases
+- **Selective loading**: Load only relevant files to reduce token usage
+- **Glob patterns**: Use `*.py` or `src/**/*.js` to load multiple related files
+- **File removal**: Click ✕ on file chips to remove specific files from context
+- **Database unloading**: Click ✕ on database chips to unload specific knowledge bases
+- **Fresh start**: Use `/new` to clear all context (files and databases) and start fresh
+- **Multiple databases**: Load related knowledge bases together for comprehensive answers
+- **Token awareness**: Monitor context size - large files consume more tokens
+
+**4. RAG Database Tips**
+- **Organize by topic**: Create separate databases for different projects/topics
+- **File formats**: Best results with text-heavy documents (PDF, DOCX, TXT, MD)
+- **Chunk size**: Default 1000 tokens works well for most documents
+- **Multiple databases**: Load multiple related knowledge bases for cross-referencing
+- **Cache location**: Database cache stored in `<folder>/.rag_cache`
+- **Source files**: Original files NOT copied - they can stay in original location
+- **Rebuilding**: Delete `.rag_cache` folder and recreate to update database
+- **Dependencies**: Install required packages: `pip install PyPDF2 sentence-transformers chromadb`
+- **Question format**: Ask specific questions for best results - vague queries return generic answers
+- **Selective unloading**: Unload databases you're not actively querying to reduce overhead
+
+**5. Keyboard Shortcuts Workflow**
 - Use `Ctrl+M` for quick model switching during conversation
 - Use `Ctrl+A` for quick agent access without typing commands
 - Use `Esc` to cancel any picker or operation
 - Use `Ctrl+T` to toggle terminal without losing focus
 - Use `Ctrl+F` to quickly load files from explorer
 
-**4. Code Block Management**
+**6. Code Block Management**
 - Hover over code blocks to see copy button
 - Click copy button to copy code to clipboard
 - Use syntax highlighting to verify code language detection
 - Collapsed sections help manage long responses
 
-**5. Development & Debugging**
+**7. Development & Debugging**
 
 **Run with hot reload for development:**
 ```bash

@@ -2,6 +2,11 @@ import glob
 import os
 import PyPDF2
 import shlex
+try:
+    from chonkie import TokenChunker
+    CHONKIE_AVAILABLE = True
+except ImportError:
+    CHONKIE_AVAILABLE = False
 
 
 # --- Token Counting Utility ---
@@ -28,6 +33,55 @@ class ContextManager:
         self.console = console
         self.conversation_history = []
         self.token_counter = token_counter or TokenCounter()
+
+    def _validate_file_type(self, file_path, allowed_extensions=None):
+        """Validate file type and provide helpful error messages for unsupported files.
+        
+        Args:
+            file_path: Path to the file to validate
+            allowed_extensions: List of allowed file extensions. If None, allow common text/document types.
+            
+        Returns:
+            True if file is valid, False otherwise
+        """
+        # Default allowed extensions for context loading
+        if allowed_extensions is None:
+            allowed_extensions = [
+                '.txt', '.md', '.py', '.js', '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.go',
+                '.rs', '.rb', '.php', '.json', '.xml', '.yaml', '.yml', '.csv', '.log',
+                '.sh', '.bash', '.sql', '.html', '.css', '.scss', '.ts', '.jsx', '.tsx',
+                '.pdf'  # PDFs are handled specially
+            ]
+        
+        file_ext = os.path.splitext(file_path)[1].lower()
+        
+        # Check if file extension is in allowed list
+        if file_ext not in allowed_extensions:
+            self.console.print(f"[bold red]Error:[/bold red] File '{os.path.basename(file_path)}' has unsupported file type '{file_ext}'.")
+            
+            # Provide specific hints for common unsupported types
+            if file_ext in ['.xlsx', '.xls', '.xlsm', '.xlsb']:
+                self.console.print(f"[yellow]Excel files are not supported for context loading.[/yellow]")
+            elif file_ext in ['.exe', '.dll', '.bin', '.so', '.dylib']:
+                self.console.print(f"[yellow]Binary executable files cannot be loaded.[/yellow]")
+            elif file_ext in ['.zip', '.rar', '.7z', '.tar', '.gz']:
+                self.console.print(f"[yellow]Compressed archive files are not supported.[/yellow]")
+            elif file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg']:
+                self.console.print(f"[yellow]Image files cannot be loaded as text.[/yellow]")
+            elif file_ext in ['.mp3', '.mp4', '.avi', '.mov', '.wav']:
+                self.console.print(f"[yellow]Media files are not supported.[/yellow]")
+            elif file_ext in ['.doc', '.ppt', '.pptx']:
+                self.console.print(f"[yellow]Microsoft Office documents (.doc, .ppt, .pptx) are not supported.[/yellow]")
+                if file_ext == '.doc':
+                    self.console.print(f"[yellow]Note: .docx files are supported, but older .doc format is not.[/yellow]")
+            
+            # Show allowed formats
+            common_formats = ['.txt', '.md', '.py', '.js', '.json', '.xml', '.csv', '.log', '.pdf']
+            allowed_str = ", ".join(common_formats)
+            self.console.print(f"[yellow]Common supported formats:[/yellow] {allowed_str}")
+            return False
+        
+        return True
 
     def expand_paths(self, paths):
         """Expand wildcards in a list of paths."""
@@ -99,7 +153,12 @@ class ContextManager:
             self.load_context(files_to_load)
 
     def read_context_file(self, file, max_size_mb=50):
-        """Read content from a file, handling both text and PDF formats with size limits."""
+        """Read content from a file, handling both text and PDF formats with size limits.
+        Uses chonkie for intelligent document chunking when available."""
+        # Validate file type first
+        if not self._validate_file_type(file):
+            raise ValueError(f"Unsupported file type: {file}")
+        
         if file.endswith('.pdf'):
             return self.read_context_pdf(file)
         else:
@@ -112,17 +171,39 @@ class ContextManager:
                     self.console.print(f"[yellow]Warning: File {file} is large ({file_size / (1024*1024):.2f} MB). Reading first {max_size_mb} MB...[/yellow]")
                     with open(file, 'r', encoding='utf-8', errors='replace') as f:
                         content = f.read(max_size_bytes)
-                    return content + f"\n\n[... File truncated at {max_size_mb} MB ...]"
+                    
+                    # Use chonkie for better chunking if available
+                    if CHONKIE_AVAILABLE:
+                        try:
+                            chunker = TokenChunker(chunk_size=4000, chunk_overlap=200)
+                            chunks = chunker.chunk(content)
+                            # Return chunked content with separators for better readability
+                            return "\n\n--- CHUNK BOUNDARY ---\n\n".join([chunk.text for chunk in chunks])
+                        except Exception as e:
+                            self.console.print(f"[yellow]Chonkie chunking failed, using default: {e}[/yellow]")
+                            return content + f"\n\n[... File truncated at {max_size_mb} MB ...]"
+                    else:
+                        return content + f"\n\n[... File truncated at {max_size_mb} MB ...]"
                 
-                # Read in chunks for better memory handling
-                content_chunks = []
+                # Read full file
                 with open(file, 'r', encoding='utf-8', errors='replace') as f:
-                    while True:
-                        chunk = f.read(8192)  # Read in 8KB chunks
-                        if not chunk:
-                            break
-                        content_chunks.append(chunk)
-                return ''.join(content_chunks)
+                    content = f.read()
+                
+                # Use chonkie for semantic chunking if the file is reasonably large
+                if CHONKIE_AVAILABLE and len(content) > 10000:  # Only chunk files > 10KB
+                    try:
+                        chunker = TokenChunker(chunk_size=4000, chunk_overlap=200)
+                        chunks = chunker.chunk(content)
+                        # For smaller files, just return as-is; for larger ones, show chunk structure
+                        if len(chunks) > 1:
+                            self.console.print(f"[cyan]Chunked file into {len(chunks)} semantic chunks using chonkie[/cyan]")
+                        return "\n\n--- CHUNK BOUNDARY ---\n\n".join([chunk.text for chunk in chunks])
+                    except Exception as e:
+                        self.console.print(f"[yellow]Chonkie chunking failed, using raw content: {e}[/yellow]")
+                        return content
+                
+                return content
+                
             except MemoryError:
                 self.console.print(f"[red]Error: File {file} too large to read into memory[/red]")
                 return f"[Error: File too large to read into memory]"

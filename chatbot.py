@@ -3,6 +3,7 @@ import glob
 import subprocess
 import tempfile
 import sys
+import threading
 from time import monotonic
 from rich.spinner import Spinner
 from typing import List, Union, Optional
@@ -83,6 +84,7 @@ class ChatBot:
             model_name=self.modelname
         )
         self.context_manager = ContextManager(self.console)
+        self.rag_knowledge_base = None  # Will be initialized when database is created/loaded
         if config_manager is None:
             self.console.print("[bold red]Error loading configuration. Exiting.[/bold red]")
             sys.exit(1)
@@ -386,86 +388,11 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
         """Display and modify settings."""
         SettingsApp(self.config_manager).run()
 
-    def run(self, initial_message=None, context=None):
-        self.display_banner()
-        if self.config_manager.get_setting('general.display_commands_on_startup', False):
-            self.command_manager.display_slash_commands()
-
-        if context:
-            if isinstance(context, str): context = [context]
-            self.context_manager.load_context(self.context_manager.expand_paths(context))
-
-        if initial_message:
-            self.console.print(f"[bold green]Initial message provided: {initial_message}[/bold green]")
-            self.handle_input(initial_message)
-
-        while True:
-            user_input = Prompt.ask(self.prompt_display.display(), console=self.console).strip()
-            self.handle_input(user_input)
-
-    def handle_input(self, input):
-        """Consume input from the user."""
-        if input.startswith('/'):
-            self.command_manager.handle_command(input)
-        else:
-            # Check if the message should use tools
-            if self.agent_model:
-                should_use_tools, detected_files = self._should_use_tools(input)
-                if should_use_tools:
-                    # Use async agent with tools
-                    import asyncio
-                    asyncio.run(self.send_message_with_tools(input))
-                else:
-                    # Use standard streaming chat
-                    self.send_message(input)
-            else:
-                # No agent model, use standard chat
-                self.send_message(input)
-
-    @CommandManager.register_command('/multi')
-    def handle_multiline_input(self):
-        """Handle multiline input."""
-        editior = os.environ.get('EDITOR', 'vim')
-        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            temp_file_name = temp_file.name
-            os.system(f"{editior} {temp_file_name}")
-            with open(temp_file_name, 'r') as f:
-                content = f.read()
-            self.console.print(f"{self.prompt_display.display()}\n{content}")
-            self.send_message(content)
-            os.remove(temp_file_name)
-
-    @CommandManager.register_command('/agent')
-    def agent_select_mode(self):
-        """Select an agentic flow."""
-        choices = self.plugin_manager.plugin_info  # Retrieve name and description from PluginManager
-        selected_index = 0
-
-        def render():
-            lines = []
-            for i, (name, description) in enumerate(choices):
-                if i == selected_index:
-                    lines.append(f"[bold green]> {name}: {description}[/bold green]")
-                else:
-                    lines.append(f"  {name}: {description}")
-            return Text.from_markup("\n".join(lines))
-
-        self.console.print("Select an option (use ↑ ↓ and Enter)\n")
-
-        with Live(render(), refresh_per_second=10, console=self.console) as live:
-            while True:
-                key = readchar.readkey()
-                if key == readchar.key.UP:
-                    selected_index = (selected_index - 1) % len(choices)
-                elif key == readchar.key.DOWN:
-                    selected_index = (selected_index + 1) % len(choices)
-                elif key == readchar.key.ENTER:
-                    break
-                live.update(render())
-
-        selection_name, selection_description = choices[selected_index]  # Get the name and description of the selected agent
-        self.console.print(f"\nSelected agent flow: [bold yellow]{selection_name}: {selection_description}[/]")
-        self.plugin_manager.run_plugin(selection_name, self.context_manager.conversation_history)
+    @CommandManager.register_command('/new', "Start a new conversation")
+    def new_conversation(self):
+        """Start a new conversation."""
+        self.context_manager.clear_conversation()
+        self.console.print("[bold blue]New conversation started.[/bold blue]")
 
     @CommandManager.register_command('/model')
     def change_chat_model(self):

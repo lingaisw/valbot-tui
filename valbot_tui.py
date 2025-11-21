@@ -84,8 +84,9 @@ import sys
 import re
 import glob
 import json
+import shlex
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Iterable, Tuple
 from pathlib import Path
 
 from textual import on, work, events
@@ -97,13 +98,16 @@ from textual.reactive import reactive
 from textual.screen import Screen
 from textual.theme import Theme
 from textual.widgets import (
-    Header, Footer, Input, Static, Button, 
+    Header, Input, Static, Button, 
     DirectoryTree, Label, Markdown, RichLog, TabbedContent, TabPane, TextArea, OptionList
 )
 from textual.widgets.option_list import Option
+from textual.widgets._directory_tree import DirEntry
+from textual.widgets._tree import TreeNode, TOGGLE_STYLE
 from textual.worker import Worker, WorkerState
 from rich.markdown import Markdown as RichMarkdown
 from rich.text import Text
+from rich.style import Style
 from rich.panel import Panel
 from rich.console import Group
 from rich.syntax import Syntax
@@ -154,6 +158,19 @@ try:
 except ImportError:
     DocxDocument = None
 
+try:
+    import pandas as pd
+    import openpyxl
+except ImportError:
+    pd = None
+    openpyxl = None
+
+try:
+    from chonkie import TokenChunker
+    CHONKIE_AVAILABLE = True
+except ImportError:
+    CHONKIE_AVAILABLE = False
+
 
 # Platform-specific emoji/symbol mapping
 print(sys.platform)
@@ -175,6 +192,8 @@ if IS_LINUX:
         'file': '◫',
         'keyboard': '⌨️ ',
         'lightning': '⚡',
+        'agent': '◈',
+        'chat' : '◷',
     }
 else:
     # Unicode emojis for Windows/Mac
@@ -191,35 +210,9 @@ else:
         'file': '📄',
         'keyboard': '⌨️',
         'lightning': '⚡',
+        'agent': '🤖',
+        'chat': '💬',
     }
-
-
-# Theme persistence configuration file path
-THEME_CONFIG_PATH = Path.home() / ".valbot_tui_config.json"
-
-
-def save_theme_config(theme_name: str) -> None:
-    """Save the current theme to the config file."""
-    try:
-        config = {"theme": theme_name}
-        with open(THEME_CONFIG_PATH, 'w') as f:
-            json.dump(config, f, indent=2)
-    except Exception as e:
-        # Silently fail if we can't save the theme config
-        pass
-
-
-def load_theme_config() -> Optional[str]:
-    """Load the saved theme from the config file."""
-    try:
-        if THEME_CONFIG_PATH.exists():
-            with open(THEME_CONFIG_PATH, 'r') as f:
-                config = json.load(f)
-                return config.get("theme")
-    except Exception as e:
-        # Silently fail if we can't load the theme config
-        pass
-    return None
 
 
 # Register custom ValBot dark theme
@@ -248,6 +241,167 @@ VALBOT_DARK_THEME = Theme(
         "indigo-dark": "#4f46e5", # Indigo-600 - dark indigo
     }
 )
+
+# Theme persistence configuration file path
+THEME_CONFIG_PATH = Path.home() / ".valbot_tui_config.json"
+
+
+def save_theme_config(theme_name: str) -> None:
+    """Save the current theme to the config file."""
+    try:
+        # Load existing config to preserve other fields
+        config = {}
+        if THEME_CONFIG_PATH.exists():
+            with open(THEME_CONFIG_PATH, 'r') as f:
+                config = json.load(f)
+        
+        # Update theme
+        config["theme"] = theme_name
+        
+        # Write back
+        with open(THEME_CONFIG_PATH, 'w') as f:
+            json.dump(config, f, indent=2)
+    except Exception as e:
+        # Silently fail if we can't save the theme config
+        pass
+
+
+def load_theme_config() -> Optional[str]:
+    """Load the saved theme from the config file."""
+    try:
+        if THEME_CONFIG_PATH.exists():
+            with open(THEME_CONFIG_PATH, 'r') as f:
+                config = json.load(f)
+                return config.get("theme")
+    except Exception as e:
+        # Silently fail if we can't load the theme config
+        pass
+    return None
+
+
+def save_history_config(location: str, max_size_gb: int) -> None:
+    """Save history configuration to the config file."""
+    try:
+        # Load existing config to preserve other fields
+        config = {}
+        if THEME_CONFIG_PATH.exists():
+            with open(THEME_CONFIG_PATH, 'r') as f:
+                config = json.load(f)
+        
+        # Update history config
+        config["history_config"] = {
+            "location": location,
+            "max_size": max_size_gb
+        }
+        
+        # Write back
+        with open(THEME_CONFIG_PATH, 'w') as f:
+            json.dump(config, f, indent=2)
+    except Exception as e:
+        # Silently fail if we can't save the history config
+        pass
+
+
+def load_history_config() -> Optional[Dict[str, Any]]:
+    """Load history configuration from the config file."""
+    try:
+        if THEME_CONFIG_PATH.exists():
+            with open(THEME_CONFIG_PATH, 'r') as f:
+                config = json.load(f)
+                return config.get("history_config")
+    except Exception as e:
+        # Silently fail if we can't load the history config
+        pass
+    return None
+
+
+def ensure_history_directory() -> Path:
+    """
+    Ensure the chat history directory exists and return its path.
+    Creates valbot_tui_chat_history folder at the configured location.
+    """
+    history_config = load_history_config()
+    
+    if history_config:
+        base_location = Path(history_config.get("location", str(Path.cwd())))
+    else:
+        base_location = Path.cwd()
+    
+    # Create the main directory and the chat_history subdirectory
+    history_dir = base_location / "valbot_tui_chat_history"
+    history_dir.mkdir(parents=True, exist_ok=True)
+    
+    return history_dir
+
+
+def get_directory_size(directory: Path) -> int:
+    """
+    Calculate the total size of all files in a directory in bytes.
+    
+    Args:
+        directory: Path to the directory
+        
+    Returns:
+        Total size in bytes
+    """
+    total_size = 0
+    try:
+        for file_path in directory.rglob('*'):
+            if file_path.is_file():
+                total_size += file_path.stat().st_size
+    except Exception:
+        pass
+    return total_size
+
+
+def cleanup_old_history(history_dir: Path, max_size_gb: int) -> None:
+    """
+    Check if chat history folder exceeds max_size and delete oldest files until it fits.
+    
+    Args:
+        history_dir: Path to the chat history directory
+        max_size_gb: Maximum size in gigabytes
+    """
+    try:
+        # Convert GB to bytes
+        max_size_bytes = max_size_gb * 1024 * 1024 * 1024
+        
+        # Get current directory size
+        current_size = get_directory_size(history_dir)
+        
+        # If under the limit, nothing to do
+        if current_size <= max_size_bytes:
+            return
+        
+        # Get all .log files sorted by modification time (oldest first)
+        log_files = []
+        for file_path in history_dir.glob('*.log'):
+            if file_path.is_file():
+                try:
+                    mtime = file_path.stat().st_mtime
+                    size = file_path.stat().st_size
+                    log_files.append((file_path, mtime, size))
+                except Exception:
+                    continue
+        
+        # Sort by modification time (oldest first)
+        log_files.sort(key=lambda x: x[1])
+        
+        # Delete oldest files until we're under the limit
+        for file_path, mtime, size in log_files:
+            if current_size <= max_size_bytes:
+                break
+            
+            try:
+                file_path.unlink()
+                current_size -= size
+            except Exception:
+                # If we can't delete a file, continue with the next one
+                continue
+                
+    except Exception:
+        # Silently fail if we encounter any errors during cleanup
+        pass
 
 
 # ============================================================================
@@ -360,14 +514,53 @@ class RAGKnowledgeBase:
                 hash_obj.update(chunk)
         return hash_obj.hexdigest()
     
+    def _validate_file_type(self, file_path: Path, allowed_extensions: List[str], method_name: str = "this method") -> bool:
+        """Validate file type and provide helpful error messages for unsupported files.
+        
+        Args:
+            file_path: Path to the file to validate
+            allowed_extensions: List of allowed file extensions (e.g., ['.pdf', '.txt'])
+            method_name: Name of the calling method for error messages
+            
+        Returns:
+            True if file is valid, False otherwise
+        """
+        file_ext = file_path.suffix.lower()
+        
+        # Check if file extension is in allowed list
+        if file_ext not in allowed_extensions:
+            self.console.print(f"[bold red]Error:[/bold red] File '{file_path.name}' is not supported by {method_name}.")
+            
+            # Provide specific hints for common unsupported types
+            if file_ext in ['.xlsx', '.xls', '.xlsm', '.xlsb']:
+                self.console.print(f"[yellow]Excel files are not supported for RAG database loading.[/yellow]")
+            elif file_ext in ['.exe', '.dll', '.bin', '.so', '.dylib']:
+                self.console.print(f"[yellow]Binary executable files cannot be loaded.[/yellow]")
+            elif file_ext in ['.zip', '.rar', '.7z', '.tar', '.gz']:
+                self.console.print(f"[yellow]Compressed archive files are not supported.[/yellow]")
+            elif file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg']:
+                self.console.print(f"[yellow]Image files cannot be loaded as text.[/yellow]")
+            elif file_ext in ['.mp3', '.mp4', '.avi', '.mov', '.wav']:
+                self.console.print(f"[yellow]Media files are not supported.[/yellow]")
+            
+            # Show allowed formats
+            allowed_str = ", ".join(allowed_extensions)
+            self.console.print(f"[yellow]Allowed formats:[/yellow] {allowed_str}")
+            return False
+        
+        return True
+    
     def extract_text_from_pdf(self, pdf_path: Path) -> str:
         """Extract all text from a PDF file."""
         try:
             with open(pdf_path, 'rb') as file:
-                reader = PyPDF2.PdfReader(file)
+                pdf_reader = PyPDF2.PdfReader(file)
                 text = ""
-                for page in reader.pages:
-                    text += page.extract_text() + "\n"
+                for page_num in range(len(pdf_reader.pages)):
+                    page = pdf_reader.pages[page_num]
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
                 return text
         except Exception as e:
             self.console.print(f"[red]Error extracting text from {pdf_path.name}: {e}[/red]")
@@ -398,6 +591,42 @@ class RAGKnowledgeBase:
     def chunk_text(self, text: str, metadata: dict) -> List[dict]:
         """Split text into overlapping chunks for better context preservation."""
         chunks = []
+        
+        # Debug: Check text length
+        if not text or not text.strip():
+            return chunks
+        
+        text_length = len(text)
+        
+        # Use Chonkie if available for better semantic chunking
+        if CHONKIE_AVAILABLE:
+            try:
+                # Use TokenChunker from Chonkie for semantic-aware chunking
+                chunker = TokenChunker(
+                    chunk_size=self.chunk_size,
+                    chunk_overlap=self.chunk_overlap
+                )
+                chonkie_chunks = chunker.chunk(text)
+                
+                for chunk_id, chunk_obj in enumerate(chonkie_chunks):
+                    chunk = {
+                        'text': chunk_obj.text.strip(),
+                        'metadata': {
+                            **metadata,
+                            'chunk_id': chunk_id,
+                            'start_char': chunk_obj.start_index if hasattr(chunk_obj, 'start_index') else 0,
+                            'end_char': chunk_obj.end_index if hasattr(chunk_obj, 'end_index') else len(chunk_obj.text)
+                        }
+                    }
+                    if chunk['text']:
+                        chunks.append(chunk)
+                
+                return chunks
+            except Exception as e:
+                # Fall back to basic chunking if Chonkie fails
+                self.console.print(f"[dim]Chonkie chunking failed, using basic chunking: {e}[/dim]")
+        
+        # Basic chunking (fallback)
         start = 0
         chunk_id = 0
         
@@ -408,13 +637,14 @@ class RAGKnowledgeBase:
             
             # Try to break at sentence boundary
             if end < len(text):
-                last_period = chunk_text.rfind('.')
+                # Look for sentence endings near the chunk boundary
+                last_period = chunk_text.rfind('. ')
                 last_newline = chunk_text.rfind('\n')
                 break_point = max(last_period, last_newline)
                 
-                if break_point > self.chunk_size * 0.5:
+                if break_point > self.chunk_size * 0.5:  # Don't break too early
+                    chunk_text = chunk_text[:break_point + 1]
                     end = start + break_point + 1
-                    chunk_text = text[start:end]
             
             # Create chunk with metadata
             chunk = {
@@ -427,7 +657,7 @@ class RAGKnowledgeBase:
                 }
             }
             
-            if chunk['text']:
+            if chunk['text']:  # Only add non-empty chunks
                 chunks.append(chunk)
                 chunk_id += 1
             
@@ -440,6 +670,13 @@ class RAGKnowledgeBase:
         """Load a text file into the vector database."""
         if not file_path.exists():
             self.console.print(f"[yellow]⚠[/yellow] File not found: {file_path}")
+            return
+        
+        # Validate file type - allow common text file extensions
+        allowed_extensions = ['.txt', '.md', '.py', '.js', '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.go', 
+                             '.rs', '.rb', '.php', '.json', '.xml', '.yaml', '.yml', '.csv', '.log', 
+                             '.sh', '.bash', '.sql', '.html', '.css', '.scss', '.ts', '.jsx', '.tsx']
+        if not self._validate_file_type(file_path, allowed_extensions, "text file loading"):
             return
         
         source_name = source_name or file_path.name
@@ -461,6 +698,10 @@ class RAGKnowledgeBase:
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 text = f.read()
+        except UnicodeDecodeError:
+            self.console.print(f"[bold red]Error:[/bold red] Unable to read '{file_path.name}' as text. This appears to be a binary file.")
+            self.console.print(f"[yellow]Supported formats:[/yellow] Text-based files only (.txt, .md, .py, .json, etc.)")
+            return
         except Exception as e:
             self.console.print(f"[red]Error reading {file_path.name}: {e}[/red]")
             return
@@ -511,11 +752,25 @@ class RAGKnowledgeBase:
             if existing_count > 0 and cache_file.exists():
                 self.console.print(f"[dim]Knowledge base already loaded ({existing_count} chunks)[/dim]")
         
-        # Find PDF files
+        # Find PDF files and validate they are PDFs
         if pdf_files is None:
             pdf_paths = list(self.pdf_dir.glob("*.pdf"))
         else:
-            pdf_paths = [self.pdf_dir / pdf for pdf in pdf_files]
+            # Handle both absolute paths and relative filenames
+            pdf_paths = []
+            for pdf in pdf_files:
+                pdf_path = Path(pdf)
+                # If it's already an absolute path, use it directly (don't combine with pdf_dir)
+                if pdf_path.is_absolute():
+                    pdf_paths.append(pdf_path)
+                else:
+                    # Otherwise treat it as relative to pdf_dir
+                    pdf_paths.append(self.pdf_dir / pdf)
+            
+            # Validate that all files are PDFs
+            for pdf_path in pdf_paths:
+                if not self._validate_file_type(pdf_path, ['.pdf'], "PDF loading"):
+                    return
         
         if not pdf_paths:
             self.console.print("[yellow]No PDF files found[/yellow]")
@@ -546,34 +801,42 @@ class RAGKnowledgeBase:
             
             for pdf_path in pdf_paths:
                 if not pdf_path.exists():
-                    progress.update(task, advance=1)
+                    self.console.print(f"  [yellow]⚠[/yellow] File not found: {pdf_path.name}")
+                    progress.advance(task)
                     continue
                 
                 # Check if already processed
                 pdf_hash = self._get_pdf_hash(pdf_path)
-                if not force_reload and pdf_path.name in processed_docs:
-                    if processed_docs[pdf_path.name] == pdf_hash:
-                        progress.update(task, advance=1, description=f"[dim]Skipping {pdf_path.name} (cached)[/dim]")
-                        continue
-                
-                progress.update(task, description=f"[cyan]Processing {pdf_path.name}...[/cyan]")
+                if pdf_path.name in processed_docs and processed_docs[pdf_path.name] == pdf_hash and not force_reload:
+                    self.console.print(f"  [dim]Skipping (cached): {pdf_path.name}[/dim]")
+                    progress.advance(task)
+                    continue
                 
                 # Extract text
+                progress.update(task, description=f"[cyan]Extracting: {pdf_path.name}")
                 text = self.extract_text_from_pdf(pdf_path)
                 
-                if text:
-                    # Create chunks
-                    metadata = {
-                        'source': pdf_path.name,
-                        'doc_hash': pdf_hash,
-                        'file_type': 'pdf'
-                    }
-                    chunks = self.chunk_text(text, metadata)
-                    all_chunks.extend(chunks)
-                    total_chunks += len(chunks)
-                    processed_docs[pdf_path.name] = pdf_hash
+                if not text:
+                    self.console.print(f"  [yellow]⚠[/yellow] No text extracted from {pdf_path.name}")
+                    progress.advance(task)
+                    continue
                 
-                progress.update(task, advance=1)
+                # Create chunks
+                progress.update(task, description=f"[cyan]Chunking: {pdf_path.name}")
+                metadata = {
+                    'source': pdf_path.name,
+                    'doc_hash': pdf_hash,
+                    'file_type': 'pdf'
+                }
+                chunks = self.chunk_text(text, metadata)
+                
+                self.console.print(f"  [green]✓[/green] {pdf_path.name}: {len(chunks)} chunks ({len(text):,} chars)")
+                
+                all_chunks.extend(chunks)
+                total_chunks += len(chunks)
+                processed_docs[pdf_path.name] = pdf_hash
+                
+                progress.advance(task)
         
         # Generate embeddings and store in ChromaDB
         if all_chunks:
@@ -626,11 +889,25 @@ class RAGKnowledgeBase:
             self.console.print(f"[yellow]⚠ python-docx not installed. Skipping .docx files. Install with: pip install python-docx[/yellow]")
             return
         
-        # Find .docx files
+        # Find .docx files and validate they are DOCX
         if docx_files is None:
             docx_paths = list(self.pdf_dir.glob("*.docx"))
         else:
-            docx_paths = [self.pdf_dir / docx for docx in docx_files]
+            # Handle both absolute paths and relative filenames
+            docx_paths = []
+            for docx in docx_files:
+                docx_path = Path(docx)
+                # If it's already an absolute path that exists, use it directly
+                if docx_path.is_absolute() and docx_path.exists():
+                    docx_paths.append(docx_path)
+                else:
+                    # Otherwise treat it as relative to pdf_dir
+                    docx_paths.append(self.pdf_dir / docx)
+            
+            # Validate that all files are DOCX
+            for docx_path in docx_paths:
+                if not self._validate_file_type(docx_path, ['.docx'], "DOCX loading"):
+                    return
         
         if not docx_paths:
             self.console.print("[yellow]No .docx files found[/yellow]")
@@ -868,7 +1145,10 @@ class TUIConsoleWrapper:
             "Found local files:",
             "Using tools",
             "→ Using tools",
-            "Running agent with tools"
+            "Running agent with tools",
+            "Loading context", "Context loaded", "File not found", "Error loading",
+            "Estimated token counts", "Total estimated tokens", "Warning:",
+            "Database", "Processing", "Skipping", "Embedding", "Overwriting"
         ]):
             role = "system"
         
@@ -1742,12 +2022,13 @@ class FileExplorerPanel(Container):
     DEFAULT_CSS = """
     FileExplorerPanel {
         width: 35%;
-        height: 100%;
+        height: 100vh;
         background: $surface;
         border: solid $primary;
         padding: 1;
         display: none;
         layer: overlay;
+        offset: 0 0;
     }
     
     FileExplorerPanel.visible {
@@ -2004,6 +2285,189 @@ class FileExplorerPanel(Container):
         self.remove_class("visible")
 
 
+class ChatHistoryTree(DirectoryTree):
+    """Custom DirectoryTree that only shows .log files without folders, sorted by date."""
+    
+    ICON_FILE = ""  # Empty icon for history files
+    
+    def filter_paths(self, paths: Iterable[Path]) -> Iterable[Path]:
+        """Filter to only show .log files, no directories."""
+        for path in paths:
+            # Only yield files that end with .log
+            if path.is_file() and path.suffix == '.log':
+                yield path
+    
+    def _populate_node(self, node, content):
+        """Override to sort files by modification time before populating."""
+        # Get the directory entries
+        from textual.widgets._directory_tree import DirEntry
+        
+        if hasattr(content, '__iter__'):
+            # Convert to list and sort by modification time (newest first)
+            entries = list(content)
+            # Filter and sort only .log files
+            # Check if entries are Path objects or DirEntry objects
+            if entries and isinstance(entries[0], Path):
+                log_entries = [e for e in entries if e.is_file() and e.suffix == '.log']
+                log_entries.sort(key=lambda e: e.stat().st_mtime, reverse=True)
+            else:
+                # DirEntry objects
+                log_entries = [e for e in entries if hasattr(e, 'path') and e.path.is_file() and e.path.suffix == '.log']
+                log_entries.sort(key=lambda e: e.path.stat().st_mtime, reverse=True)
+            
+            # Call parent with sorted entries
+            content = iter(log_entries)
+        
+        return super()._populate_node(node, content)
+    
+    def render_label(self, node: TreeNode[DirEntry], base_style: Style, style: Style) -> Text:
+        """Render tree label without .log extension."""
+        node_label = node._label.copy()
+        # Remove .log extension from the label
+        label_text = str(node_label.plain)
+        if label_text.endswith('.log'):
+            label_text = label_text[:-4]
+            node_label = Text(label_text, style=node_label.style)
+        
+        node_label.stylize(style)
+        
+        if node._allow_expand:
+            prefix = ("▶ " if node.is_expanded else "▸ ", base_style + TOGGLE_STYLE)
+            node_label.stylize_before(
+                self.get_component_rich_style("directory-tree--folder", partial=True),
+            )
+        else:
+            prefix = (self.ICON_FILE, base_style)
+            node_label.stylize_before(
+                self.get_component_rich_style("directory-tree--file", partial=True),
+            )
+            node_label.highlight_regex(
+                r"\\..*$",
+                self.get_component_rich_style("directory-tree--extension", partial=True),
+            )
+        
+        if node._label.plain.startswith("."):
+            node_label.stylize_before(
+                self.get_component_rich_style("directory-tree--hidden", partial=True)
+            )
+        
+        text = Text.assemble(prefix, node_label)
+        return text
+
+
+class ChatHistoryPanel(Container):
+    """Material Design chat history panel for browsing saved chat logs."""
+    
+    DEFAULT_CSS = """
+    ChatHistoryPanel {
+        width: 35%;
+        height: 100vh;
+        background: $surface;
+        border: solid $primary;
+        padding: 1;
+        display: none;
+        layer: overlay;
+        offset: 0 0;
+    }
+    
+    ChatHistoryPanel.visible {
+        display: block;
+    }
+    
+    #history-header {
+        width: 100%;
+        height: 1;
+        layout: horizontal;
+        align: right middle;
+        margin-bottom: 1;
+    }
+    
+    #history-header Button {
+        width: auto;
+        height: 1;
+        min-width: 3;
+        padding: 0 1;
+        margin: 0 1 0 0;
+        border: none;
+        background: $panel;
+        content-align: center middle;
+    }
+    
+    #history-header Button:hover {
+        background: $surface-lighten-1;
+    }
+    
+    #history-header Button:last-child {
+        margin: 0;
+    }
+    
+    #history-tree {
+        height: 1fr;
+        scrollbar-size: 1 1;
+    }
+    """
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.border_title = f"{EMOJI['chat']} Chat History"
+        self.history_path = None  # Will be set from config
+        
+    def compose(self) -> ComposeResult:
+        """Compose the chat history panel."""
+        # Header with gear button (config) and close button at top right
+        with Horizontal(id="history-header"):
+            yield Button("⛯", id="history-config-btn", variant="primary")
+            yield Button("✕", id="history-close-btn", variant="primary")
+        
+        # Get history directory from config
+        history_config = load_history_config()
+        if history_config:
+            location = history_config.get('location', str(Path.cwd()))
+            self.history_path = Path(location) / "valbot_tui_chat_history"
+        else:
+            # Fallback to current directory
+            self.history_path = Path.cwd() / "valbot_tui_chat_history"
+        
+        # Create history directory if it doesn't exist
+        self.history_path.mkdir(parents=True, exist_ok=True)
+        
+        # Directory tree showing only log files
+        yield ChatHistoryTree(str(self.history_path), id="history-tree")
+    
+    async def on_mount(self) -> None:
+        """Load the history tree on mount."""
+        try:
+            tree = self.query_one("#history-tree", ChatHistoryTree)
+            tree.reload()
+        except Exception:
+            pass
+    
+    def refresh_history(self) -> None:
+        """Refresh the history tree to show new entries."""
+        try:
+            tree = self.query_one("#history-tree", ChatHistoryTree)
+            tree.reload()
+        except Exception:
+            pass
+    
+    @on(Button.Pressed, "#history-close-btn")
+    def action_close_history(self):
+        """Close the chat history panel."""
+        self.remove_class("visible")
+    
+    @on(Button.Pressed, "#history-config-btn")
+    def action_open_history_config(self):
+        """Open the history configuration screen."""
+        def on_config_complete(result):
+            """Callback after config screen is closed."""
+            if result:
+                # Configuration was saved, refresh the history tree with new location
+                self.refresh_history()
+        
+        # Push the HistoryConfigScreen
+        self.app.push_screen(HistoryConfigScreen(), callback=on_config_complete)
+
+
 class StatusBar(Container):
     """Modern Material Design status bar with clickable model button."""
     
@@ -2250,9 +2714,9 @@ class InlinePicker(OptionList):
     BINDINGS = [
         Binding("ctrl+d", "parent_agent_picker", "Agent", show=True, priority=True),
         Binding("ctrl+f", "parent_toggle_files", "Files", show=True, priority=True),
+        Binding("ctrl+g", "parent_toggle_history", "History", show=True, priority=True),
         Binding("ctrl+n", "parent_new_chat", "New Chat", show=True, priority=True),
         Binding("ctrl+o", "parent_change_model", "Model", show=True, priority=True),
-        Binding("ctrl+s", "parent_save_session", "Save", show=True, priority=True),
         Binding("escape", "cancel_picker", "Cancel", show=True, priority=True),
         Binding("ctrl+q", "parent_quit", "Quit", show=True, priority=True),
     ]
@@ -2376,15 +2840,15 @@ class InlinePicker(OptionList):
         if hasattr(self.screen, 'action_toggle_files'):
             self.screen.action_toggle_files()
     
+    def action_parent_toggle_history(self) -> None:
+        """Delegate to parent screen's toggle history action."""
+        if hasattr(self.screen, 'action_toggle_history'):
+            self.screen.action_toggle_history()
+    
     def action_parent_new_chat(self) -> None:
         """Delegate to parent screen's new chat action."""
         if hasattr(self.screen, 'action_new_chat'):
             self.screen.action_new_chat()
-    
-    def action_parent_save_session(self) -> None:
-        """Delegate to parent screen's save session action."""
-        if hasattr(self.screen, 'action_save_session'):
-            self.screen.action_save_session()
     
     def action_parent_quit(self) -> None:
         """Delegate to parent app's quit action."""
@@ -2673,36 +3137,28 @@ class ContextChipBar(Container):
                 chip.remove()
                 break
         
-        # Hide bar if empty
+        # Hide the bar if no chips remain
         if not self.loaded_files and not self.loaded_databases:
             self.remove_class("visible")
     
-    def remove_database(self, db_path: str = None):
-        """Remove a specific database chip from the bar, or all if db_path is None."""
-        if db_path is None:
-            # Remove all databases
-            self.loaded_databases.clear()
-            # Remove all database chip widgets
-            for chip in list(self.query(ContextChip)):
-                if chip.item_type == "database":
-                    chip.remove()
-        else:
-            # Remove specific database
-            if db_path in self.loaded_databases:
-                self.loaded_databases.remove(db_path)
-            
-            # Find and remove the chip widget
-            for chip in self.query(ContextChip):
-                if chip.item_type == "database" and chip.item_name == db_path:
-                    chip.remove()
-                    break
+    def remove_database(self, db_path: str):
+        """Remove a database chip from the bar."""
+        if db_path in self.loaded_databases:
+            self.loaded_databases.remove(db_path)
         
-        # Hide bar if empty
+        # Find and remove the chip widget
+        for chip in self.query(ContextChip):
+            if chip.item_type == "database" and chip.item_name == db_path:
+                chip.remove()
+                break
+        
+        # Hide the bar if no chips remain
         if not self.loaded_files and not self.loaded_databases:
             self.remove_class("visible")
     
     def clear_all(self):
-        """Clear all chips from the bar."""
+        """Remove all chips from the bar."""
+        # Clear the lists
         self.loaded_files.clear()
         self.loaded_databases.clear()
         
@@ -2710,7 +3166,306 @@ class ContextChipBar(Container):
         for chip in list(self.query(ContextChip)):
             chip.remove()
         
+        # Hide the bar
         self.remove_class("visible")
+
+
+# ============================================================================
+# History Configuration Screen
+# ============================================================================
+
+class HistoryConfigScreen(Screen):
+    """Full-screen overlay for configuring chat history settings on first run."""
+    
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel", show=False),
+    ]
+    
+    CSS = """
+    HistoryConfigScreen {
+        align: center middle;
+        background: $background 90%;
+    }
+    
+    #config-dialog {
+        width: 80;
+        height: auto;
+        max-width: 100;
+        background: $surface;
+        border: solid $primary;
+        padding: 2 4;
+    }
+    
+    #config-title {
+        width: 100%;
+        text-align: center;
+        text-style: bold;
+        color: $primary;
+        margin-bottom: 2;
+    }
+    
+    #config-description {
+        width: 100%;
+        text-align: center;
+        color: $text-muted;
+        margin-bottom: 3;
+    }
+    
+    .config-label {
+        width: 100%;
+        color: $text;
+        text-style: bold;
+        margin-top: 2;
+        margin-bottom: 1;
+    }
+    
+    .config-input {
+        width: 100%;
+        height: 1;
+        margin-bottom: 1;
+        padding: 0 1;
+        background: $panel;
+        border: none;
+    }
+    
+    .config-help {
+        width: 100%;
+        color: $text-muted;
+        margin-top: 0;
+        margin-bottom: 2;
+    }
+    
+    #button-container {
+        width: 100%;
+        height: 1;
+        layout: horizontal;
+        margin-top: 3;
+        margin-bottom: 1;
+    }
+    
+    #button-container Button {
+        width: 2fr;
+        height: 1;
+        min-width: 0;
+        padding: 0;
+        margin: 0 1 0 0;
+        border: none;
+        background: $panel;
+        content-align: center middle;
+    }
+    
+    #button-container Button:hover {
+        background: $surface-lighten-1;
+    }
+    
+    #button-container Button:last-child {
+        margin: 0;
+    }
+    
+    #button-container Button#save-btn {
+        background: $primary;
+    }
+    
+    #button-container Button#save-btn:hover {
+        background: $primary-lighten-1;
+    }
+    """
+    
+    def __init__(self):
+        super().__init__()
+        self.default_location = str(Path.cwd())
+        self.default_max_size = 5
+    
+    def compose(self) -> ComposeResult:
+        """Compose the configuration dialog."""
+        with Container(id="config-dialog"):
+            yield Static(f"{EMOJI['gear']} Chat History Configuration", id="config-title")
+            yield Static("Configure where to save chat history and maximum storage size", id="config-description")
+            
+            yield Static("History Location:", classes="config-label")
+            yield Input(
+                value=self.default_location,
+                placeholder="Enter path to save chat history",
+                id="location-input",
+                classes="config-input"
+            )
+            yield Static("Path where chat history will be saved", classes="config-help")
+            
+            yield Static("Maximum Size (GB):", classes="config-label")
+            yield Input(
+                value=str(self.default_max_size),
+                placeholder="Enter maximum size in GB",
+                id="maxsize-input",
+                classes="config-input"
+            )
+            yield Static("Maximum storage space for chat history (default: 5 GB)", classes="config-help")
+            
+            with Container(id="button-container"):
+                yield Button("Save", id="save-btn", variant="primary")
+                yield Button("Cancel", id="cancel-btn", variant="default")
+    
+    def on_mount(self) -> None:
+        """Focus the location input when mounted."""
+        self.query_one("#location-input", Input).focus()
+    
+    @on(Button.Pressed, "#save-btn")
+    async def save_configuration(self) -> None:
+        """Save the configuration and dismiss the screen."""
+        try:
+            location_input = self.query_one("#location-input", Input)
+            maxsize_input = self.query_one("#maxsize-input", Input)
+            
+            location = location_input.value.strip()
+            if not location:
+                location = self.default_location
+            
+            # Validate and parse max size
+            try:
+                max_size = int(maxsize_input.value.strip())
+                if max_size < 1:
+                    max_size = self.default_max_size
+            except ValueError:
+                max_size = self.default_max_size
+            
+            # Save configuration
+            save_history_config(location, max_size)
+            
+            # Dismiss the screen
+            self.dismiss(True)
+            
+        except Exception as e:
+            # On error, use defaults
+            save_history_config(self.default_location, self.default_max_size)
+            self.dismiss(True)
+    
+    @on(Button.Pressed, "#cancel-btn")
+    async def cancel_configuration(self) -> None:
+        """Cancel and use default configuration."""
+        save_history_config(self.default_location, self.default_max_size)
+        self.dismiss(False)
+    
+    def action_cancel(self) -> None:
+        """Handle escape key - use default configuration."""
+        save_history_config(self.default_location, self.default_max_size)
+        self.dismiss(False)
+
+
+class SidebarButtonPressed(Message):
+    """Message sent when a sidebar button is pressed."""
+    def __init__(self, button_id: str):
+        super().__init__()
+        self.button_id = button_id
+
+
+class Sidebar(Container):
+    """Collapsible sidebar with icon buttons for main actions."""
+    
+    DEFAULT_CSS = """
+    Sidebar {
+        width: auto;
+        height: 100%;
+        background: $background;
+        border-right: solid $panel;
+        padding: 0;
+        margin: 0 !important;
+    }
+    
+    Sidebar.expanded {
+        width: auto;
+    }
+    
+    Sidebar Button {
+        width: auto;
+        height: 3;
+        min-height: 3;
+        min-width: 0;
+        margin: 0;
+        border: none !important;
+        background: transparent !important;
+        content-align: center middle;
+        text-align: center;
+        padding: 0;
+    }
+    
+    Sidebar.collapsed Button .button-label-text {
+        display: none;
+    }
+    
+    Sidebar.expanded Button {
+        content-align: left middle;
+        text-align: left;
+        padding: 0 2;
+    }
+    """
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.expanded = False
+        self.add_class("collapsed")
+    
+    def compose(self) -> ComposeResult:
+        """Compose the sidebar buttons."""
+        yield Button(">", id="btn-expand", variant="default")
+        yield Button("+", id="btn-new-chat", variant="default")
+        yield Button("◨", id="btn-files", variant="default")
+        yield Button("◈", id="btn-agent", variant="default")
+        yield Button("◷", id="btn-history", variant="default")
+    
+    def toggle_expand(self) -> None:
+        """Toggle sidebar expansion."""
+        self.expanded = not self.expanded
+        
+        if self.expanded:
+            self.remove_class("collapsed")
+            self.add_class("expanded")
+            # Update button labels to show text
+            try:
+                self.query_one("#btn-expand", Button).label = "< Collapse"
+                self.query_one("#btn-new-chat", Button).label = f"+ New Chat"
+                self.query_one("#btn-files", Button).label = f"◨ Files"
+                self.query_one("#btn-agent", Button).label = f"◈ Agent"
+                self.query_one("#btn-history", Button).label = f"◷ History"
+            except Exception:
+                pass
+        else:
+            self.remove_class("expanded")
+            self.add_class("collapsed")
+            # Update button labels to show only icons
+            try:
+                self.query_one("#btn-expand", Button).label = ">"
+                self.query_one("#btn-new-chat", Button).label = "+"
+                self.query_one("#btn-files", Button).label = "◨"
+                self.query_one("#btn-agent", Button).label = "◈"
+                self.query_one("#btn-history", Button).label = "◷"
+            except Exception:
+                pass
+        
+        self.refresh(layout=True)
+    
+    @on(Button.Pressed, "#btn-expand")
+    def handle_expand_button(self) -> None:
+        """Handle expand/collapse button press."""
+        self.toggle_expand()
+    
+    @on(Button.Pressed, "#btn-new-chat")
+    def handle_new_chat_button(self) -> None:
+        """Handle new chat button press."""
+        self.post_message(SidebarButtonPressed("new-chat"))
+    
+    @on(Button.Pressed, "#btn-agent")
+    def handle_agent_button(self) -> None:
+        """Handle agent button press."""
+        self.post_message(SidebarButtonPressed("agent"))
+    
+    @on(Button.Pressed, "#btn-files")
+    def handle_files_button(self) -> None:
+        """Handle files button press."""
+        self.post_message(SidebarButtonPressed("files"))
+    
+    @on(Button.Pressed, "#btn-history")
+    def handle_history_button(self) -> None:
+        """Handle history button press."""
+        self.post_message(SidebarButtonPressed("history"))
 
 
 class MainScreen(Screen):
@@ -2719,9 +3474,9 @@ class MainScreen(Screen):
     BINDINGS = [
         Binding("ctrl+d", "agent_picker", "Agent", priority=True),
         Binding("ctrl+f", "toggle_files", "Files", priority=True),
+        Binding("ctrl+g", "toggle_history", "History", priority=True),
         Binding("ctrl+n", "new_chat", "New Chat", priority=True),
         Binding("ctrl+o", "change_model", "Model", priority=True),
-        Binding("ctrl+s", "save_session", "Save", priority=True),
         Binding("escape", "cancel", "Cancel", priority=True),
         Binding("ctrl+q", "quit", "Quit", priority=True),
     ]
@@ -2730,11 +3485,22 @@ class MainScreen(Screen):
     MainScreen {
         background: $background;
         layers: base overlay;
+        layout: horizontal;
+    }
+    
+    #sidebar {
+        height: 100%;
+    }
+    
+    #main-content-area {
+        layout: vertical;
+        width: 1fr;
+        height: 100%;
     }
     
     #main-container {
         layout: vertical;
-        height: 100%;
+        height: 1fr;
         width: 100%;
         background: $background;
     }
@@ -2746,6 +3512,12 @@ class MainScreen(Screen):
     
     #file-panel {
         dock: right;
+        layer: overlay;
+    }
+    
+    #history-panel {
+        dock: left;
+        layer: overlay;
     }
     
     #input-container {
@@ -2753,7 +3525,6 @@ class MainScreen(Screen):
         width: 100%;
         padding: 1 2;
         background: $surface;
-        dock: bottom;
     }
     
     #command-input {
@@ -2796,15 +3567,6 @@ class MainScreen(Screen):
         border: none !important;
     }
     
-    /*Footer */
-    
-    Footer {
-        background: $surface;
-    }
-    
-    Footer > .footer--key {
-        background: $primary-darken-1;
-    }
     """
     
     def __init__(self, config_manager: ConfigManager, *args, **kwargs):
@@ -2813,34 +3575,144 @@ class MainScreen(Screen):
         self.chatbot = None
         self.processing = False
         self.show_files = False
+        self.show_history = False
         self._active_picker_type = None  # Track which picker is currently open ('agent', 'model', etc.)
         self._cancel_streaming = False  # Flag to cancel ongoing streaming
         self._cancel_agent = False  # Flag to cancel ongoing agent execution
         self._file_autocomplete_context = None  # Track file path autocomplete context
         
+        # Chat history tracking
+        self._current_session_file = None  # Path to current session log file
+        self._session_start_time = None  # Timestamp when session started
+        self._session_initialized = False  # Flag to track if session file has been created
+        self._last_autosave_content = ""  # Track last saved content to avoid duplicate saves
+        self._first_user_input = None  # Track first user input for filename generation
+        
     def compose(self) -> ComposeResult:
         """Compose the modern Material Design layout."""
         yield Header(show_clock=True, icon="☰")
         
+        # Sidebar (docked to left)
+        yield Sidebar(id="sidebar")
+        
         # File explorer overlay (appears on top when toggled)
         yield FileExplorerPanel(id="file-panel")
         
-        with Container(id="main-container"):
-            # Main chat area (scrollable)
-            with Vertical(id="chat-container"):
-                yield ChatPanel(id="chat-panel")
+        # Chat history overlay (appears on top when toggled)
+        yield ChatHistoryPanel(id="history-panel")
         
-        # Input area at bottom (fixed)
-        with Vertical(id="input-container"):
-            # Context chip bar (shows loaded files/databases)
-            yield ContextChipBar(id="context-chip-bar")
-            yield CommandInput(id="command-input")
-            yield StatusBar(id="status-bar")
+        # Main content area (everything to the right of sidebar)
+        with Container(id="main-content-area"):
+            with Container(id="main-container"):
+                # Main chat area (scrollable)
+                with Vertical(id="chat-container"):
+                    yield ChatPanel(id="chat-panel")
+            
+            # Input area at bottom (fixed)
+            with Vertical(id="input-container"):
+                # Context chip bar (shows loaded files/databases)
+                yield ContextChipBar(id="context-chip-bar")
+                yield CommandInput(id="command-input")
+                yield StatusBar(id="status-bar")
         
         # Autocomplete overlay (on its own layer)
         yield AutocompleteOverlay(id="autocomplete-overlay")
+    
+    def _initialize_session_file(self, first_message: str = "") -> None:
+        """Initialize a new session log file with timestamp-based naming.
+        
+        Args:
+            first_message: The first user message, used to generate a descriptive filename
+        """
+        if self._session_initialized:
+            return
+        
+        try:
+            # Get history directory
+            history_dir = ensure_history_directory()
             
-        yield Footer()
+            # Check and cleanup old history files if exceeding max_size
+            history_config = load_history_config()
+            if history_config:
+                max_size_gb = history_config.get("max_size", 5)  # Default to 5 GB
+                cleanup_old_history(history_dir, max_size_gb)
+            
+            # Create filename based on first message (first 20 chars) and timestamp
+            self._session_start_time = datetime.now()
+            timestamp = self._session_start_time.strftime("%Y%m%d_%H%M%S")
+            
+            # Generate descriptive prefix from first message
+            if first_message:
+                # Take first 20 characters, replace spaces with underscores, remove special chars
+                prefix = first_message[:20].replace(' ', '_')
+                # Keep only alphanumeric and underscores
+                prefix = ''.join(c for c in prefix if c.isalnum() or c == '_')
+                # Remove consecutive underscores
+                while '__' in prefix:
+                    prefix = prefix.replace('__', '_')
+                # Remove leading/trailing underscores
+                prefix = prefix.strip('_')
+                # Ensure prefix is not empty
+                if prefix:
+                    filename = f"{prefix}.log"
+                else:
+                    filename = f"chat_{timestamp}.log"
+            else:
+                filename = f"chat_{timestamp}.log"
+            
+            self._current_session_file = history_dir / filename
+            
+            # Create the file with a header
+            with open(self._current_session_file, 'w', encoding='utf-8') as f:
+                f.write(f"ValBot TUI Chat Log\n")
+                f.write(f"Session Started: {self._session_start_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("=" * 80 + "\n\n")
+            
+            self._session_initialized = True
+            
+        except Exception as e:
+            # Silently fail if we can't create the session file
+            pass
+    
+    async def _autosave_message(self, role: str, content: str, agent_name: Optional[str] = None) -> None:
+        """
+        Autosave a message to the current session file.
+        This runs in the background and doesn't block the UI.
+        """
+        try:
+            # Initialize session file if this is the first message
+            if not self._session_initialized:
+                # Store first user input for filename generation
+                if role == "user" and not self._first_user_input:
+                    self._first_user_input = content
+                self._initialize_session_file(self._first_user_input or "")
+            
+            if not self._current_session_file:
+                return
+            
+            # Prepare the message entry
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            role_label = role.upper()
+            
+            if role == "assistant" and agent_name:
+                role_label += f" (Agent: {agent_name})"
+            
+            # Append to the file asynchronously
+            await asyncio.to_thread(self._write_to_session_file, timestamp, role_label, content)
+            
+        except Exception as e:
+            # Silently fail to not disrupt the user experience
+            pass
+    
+    def _write_to_session_file(self, timestamp: str, role_label: str, content: str) -> None:
+        """Synchronous write operation to be run in a thread."""
+        try:
+            with open(self._current_session_file, 'a', encoding='utf-8') as f:
+                f.write(f"[{timestamp}] {role_label}:\n")
+                f.write(f"{content}\n")
+                f.write("-" * 80 + "\n\n")
+        except Exception:
+            pass
         
     async def on_mount(self) -> None:
         """Initialize the application after mounting."""
@@ -2900,6 +3772,24 @@ class MainScreen(Screen):
             # Show notification
             chat_panel.add_message("system", 
                 f"{EMOJI['checkmark']} Unloaded database: `{message.item_name}`")
+        
+        # Auto-focus the input text area after removing a context chip
+        try:
+            command_input = self.query_one("#command-input", CommandInput)
+            command_input.focus()
+        except Exception:
+            pass
+    
+    def on_sidebar_button_pressed(self, message: SidebarButtonPressed) -> None:
+        """Handle sidebar button presses."""
+        if message.button_id == "new-chat":
+            asyncio.create_task(self.action_new_chat())
+        elif message.button_id == "agent":
+            asyncio.create_task(self.action_agent_picker())
+        elif message.button_id == "files":
+            self.action_toggle_files()
+        elif message.button_id == "history":
+            self.action_toggle_history()
     
     def show_welcome_message(self):
         """Display the welcome message."""
@@ -3364,20 +4254,14 @@ Please check your configuration and try again.
         command_input.focus()
     
     def _update_footer_bindings(self, picker_open: bool):
-        """Update footer bindings based on whether picker is open.
+        """Placeholder for footer binding updates (footer removed but bindings still active).
         
         Args:
             picker_open: True if picker is open, False otherwise
         """
-        # The bindings are already in the correct order:
-        # agent, files, new chat, model, save, load, cancel, quit
-        # When picker is open, we just need to ensure the footer refreshes
-        # Textual will automatically show the bindings from BINDINGS
-        try:
-            footer = self.app.query_one(Footer)
-            footer.refresh()
-        except Exception:
-            pass
+        # Footer widget removed, but BINDINGS are still active
+        # Key bindings work automatically without the footer widget
+        pass
     
     async def show_inline_picker(self, title: str, options: list, picker_type: str = None):
         """Show an inline picker that replaces the textarea.
@@ -3595,6 +4479,9 @@ Please check your configuration and try again.
                 chat_panel = self.query_one("#chat-panel", ChatPanel)
                 chat_panel.add_message("user", formatted_message)
                 
+                # Autosave user message in the background
+                asyncio.create_task(self._autosave_message("user", message_without_slash))
+                
                 # Send the message without slash to the chatbot (without double newlines) in background thread
                 import threading
                 thread = threading.Thread(
@@ -3611,6 +4498,9 @@ Please check your configuration and try again.
             # Display user message immediately
             chat_panel = self.query_one("#chat-panel", ChatPanel)
             chat_panel.add_message("user", formatted_message)
+            
+            # Autosave user message in the background
+            asyncio.create_task(self._autosave_message("user", message))
             
             # Send the original message to the chatbot (without double newlines) in background thread
             import threading
@@ -3726,7 +4616,7 @@ Restarting TUI to reload configuration...
                     agent_options = [(f"{name}: {desc}", name) for name, desc in agents]
                     
                     # Show the inline picker first
-                    await self.show_inline_picker(f"{EMOJI['robot']} Select Agent Workflow", agent_options)
+                    await self.show_inline_picker(f"{EMOJI['agent']} Select Agent Workflow", agent_options)
                     
                     # Store callback for when selection is made (after picker is shown)
                     self._picker_callback = on_agent_selected
@@ -3759,7 +4649,11 @@ Restarting TUI to reload configuration...
                 self._active_rag_kb = None
             
             # Clear context chip bar
-            self._context_chip_bar.clear_all()
+            try:
+                context_chip_bar = self.query_one("#context-chip-bar", ContextChipBar)
+                context_chip_bar.clear_all()
+            except Exception:
+                pass
             
             # Completely reinitialize the chatbot (like quitting and relaunching)
             if self.chatbot:
@@ -3795,7 +4689,7 @@ Restarting TUI to reload configuration...
 - `/prompts` - Show available custom prompts
 - `/commands` - Show all available commands
 - `/settings` - Show settings (CLI mode only)
-- `/create_database <folder> <files>` - Create a RAG database
+- `/create_database <folder> <files>` - Create a RAG database (supports PDF, DOCX, XLSX, XLS, TXT, MD, etc.)
 - `/load_database <folder1> [folder2] ...` - Load one or more databases
 - `/quit` - Exit the application
 
@@ -3804,7 +4698,7 @@ Restarting TUI to reload configuration...
 - Use `/` prefix for commands
 - Agent workflows provide specialized functionality
 - Context files are remembered throughout conversation
-- RAG databases enable Q&A with your documents
+- RAG databases enable Q&A with your documents (now includes Excel support!)
 - Load multiple databases with space-separated paths
 - Click ✕ on database chips to unload specific databases
 - Use `/new` to unload all databases and start fresh
@@ -3881,8 +4775,8 @@ Error executing command `{cmd}`:
 
 ### RAG database (Document Q&A)
 - `/create_database <folder> <files>` - Create a searchable database
-  - Example: `/create_database ./kb doc1.pdf doc2.txt notes.md`
-  - Supports: PDF, DOCX, TXT, MD, PDL, PY, C, CPP, H files
+  - Example: `/create_database ./kb doc1.pdf doc2.txt notes.md data.xlsx`
+  - Supports: PDF, DOCX, XLSX, XLS, TXT, MD, PDL, PY, C, CPP, H files
   - Creates vector embeddings for semantic search
 - `/load_database <folder1> [folder2] ...` - Load one or more databases
   - Example: `/load_database ./kb` - Load single database
@@ -3923,10 +4817,9 @@ Error executing command `{cmd}`:
 |----------|--------|-------------|
 | **ctrl+d** | Agent | Select and run an agent workflow |
 | **ctrl+f** | Files | Toggle file explorer panel |
+| **ctrl+g** | History | Toggle chat history panel |
 | **ctrl+n** | New Chat | Clear conversation and start fresh |
 | **ctrl+o** | Model | Open model picker dialog |
-| **ctrl+s** | Save | Save session (coming soon) |
-| **ctrl+l** | Load | Load session (coming soon) |
 | **escape** | Cancel | Cancel current operation/close dialogs |
 | **ctrl+q** | Quit | Exit the application |
 
@@ -3936,6 +4829,7 @@ Error executing command `{cmd}`:
 - **Code Highlighting**: Syntax-highlighted code blocks with copy buttons
   - Supports: Python, JavaScript, Java, C++, Go, Rust, and more
 - **Streaming**: Real-time response streaming as AI generates text
+- **Autosave**: Chat history is automatically saved to disk
 - **Reasoning Display**: GPT-5 shows its thinking process (if enabled)
   - Configure in `user_config.json`: `"display_reasoning": true`
   - Set effort level: `"reasoning_effort": "low|medium|high"`
@@ -4237,10 +5131,10 @@ Default: vim (Linux/Mac) or notepad (Windows)
 **Usage**: `/create_database <output_folder> <file1> [file2] [file3] ...`
 
 **Example**:
-- `/create_database ./my_kb document1.pdf document2.docx notes.txt`
-- `/create_database C:/kb *.pdf *.txt`
+- `/create_database ./my_kb document1.pdf document2.docx notes.txt data.xlsx`
+- `/create_database C:/kb *.pdf *.txt *.xlsx`
 
-**Supported file types**: PDF, DOCX, TXT, MD, PDL, PY, C, CPP, H
+**Supported file types**: PDF, DOCX, XLSX, XLS, TXT, MD, PDL, PY, C, CPP, H
 
 This will process your documents and create a searchable database with vector embeddings.
 The cache and database files will be stored in the output folder.
@@ -5495,7 +6389,14 @@ pip install {' '.join(missing)}
             output_path = Path(output_folder)
             output_path.mkdir(parents=True, exist_ok=True)
             
-            # Initialize RAG database (now using the built-in class)
+            # Create a console wrapper to capture RAG output to TUI
+            import io
+            from rich.console import Console as RichConsole
+            
+            # Initialize RAG database with a StringIO console to suppress rich output
+            string_buffer = io.StringIO()
+            rag_console = RichConsole(file=string_buffer, force_terminal=True)
+            
             rag_kb = RAGKnowledgeBase(
                 pdf_dir=output_path,
                 cache_dir=output_path / ".rag_cache",
@@ -5503,6 +6404,8 @@ pip install {' '.join(missing)}
                 chunk_overlap=200,
                 collection_name="rag_knowledge_base"
             )
+            # Override the console to suppress rich output in thread
+            rag_kb.console = rag_console
             
             # Process each file
             processed_count = 0
@@ -5511,11 +6414,15 @@ pip install {' '.join(missing)}
             for file_path_str in file_paths_input:
                 file_path = Path(file_path_str.strip())
                 
+                # If path is not absolute, resolve it relative to current working directory
+                if not file_path.is_absolute():
+                    file_path = file_path.resolve()
+                
                 if not file_path.exists():
                     self.app.call_from_thread(
                         chat_panel.add_message,
-                        "system",
-                        f"{EMOJI['cross']} File not found: `{file_path}`"
+                        "error",
+                        f"{EMOJI['cross']} File not found: `{file_path_str}`\n\nSearched at: `{file_path}`\n\nMake sure the file exists or provide the full absolute path."
                     )
                     failed_count += 1
                     continue
@@ -5532,6 +6439,7 @@ pip install {' '.join(missing)}
                     # Process file directly from its location (no copying needed)
                     if suffix == '.pdf':
                         rag_kb.load_pdfs([str(file_path)], force_reload=True)
+                        processed_count += 1
                     elif suffix == '.docx':
                         rag_kb.load_docx_files([str(file_path)], force_reload=True)
                     elif suffix in ['.txt', '.pdl', '.md', '.py', '.c', '.cpp', '.h']:
@@ -5786,17 +6694,64 @@ To unload all databases and return to normal chat, use `/new`.
             
             # Query all loaded databases and combine results
             all_contexts = []
+            total_retrieved_chunks = 0
+            
             for db_path, rag_kb in self._active_rag_kb.items(): 
                 try:
-                    context = rag_kb.get_context_for_query(
+                    # Check stats first
+                    stats = rag_kb.get_stats()
+                    if stats['total_chunks'] == 0:
+                        self.app.call_from_thread(
+                            chat_panel.add_message,
+                            "system",
+                            f"⚠️ Database `{Path(db_path).name}` is empty (0 chunks)."
+                        )
+                        continue
+
+                    # Retrieve relevant chunks
+                    # We use a generous top_k because we want to capture enough context
+                    chunks = rag_kb.retrieve_relevant_context(
                         query=question,
-                        top_k=8,
-                        include_metadata=True
+                        top_k=20
                     )
                     
-                    if context and context != "No relevant information found.":
-                        # Add database source to context
-                        all_contexts.append(f"### From database: {db_path}\n\n{context}")
+                    if not chunks:
+                        self.app.call_from_thread(
+                            chat_panel.add_message,
+                            "system",
+                            f"ℹ️ No relevant chunks found in `{Path(db_path).name}`."
+                        )
+                        continue
+                        
+                    # Format context
+                    context_parts = []
+                    for chunk in chunks:
+                        meta = chunk['metadata']
+                        source = meta.get('source', 'Unknown')
+                        sheet = meta.get('sheet', '')
+                        type_ = meta.get('type', '')
+                        
+                        header = f"Source: {source}"
+                        if sheet:
+                            header += f" | Sheet: {sheet}"
+                        if type_ == 'summary':
+                            header += " | [SUMMARY]"
+                            
+                        context_parts.append(f"[{header}]\n{chunk['text']}")
+                    
+                    db_context = "\n\n".join(context_parts)
+                    
+                    # Add database source to context
+                    all_contexts.append(f"### From database: {Path(db_path).name}\n\n{db_context}")
+                    
+                    total_retrieved_chunks += len(chunks)
+                    
+                    self.app.call_from_thread(
+                        chat_panel.add_message,
+                        "system",
+                        f"📊 Retrieved {len(chunks)} chunks from `{Path(db_path).name}`"
+                    )
+                    
                 except Exception as e:
                     # Log error but continue with other databases
                     self.app.call_from_thread(
@@ -5819,6 +6774,20 @@ To unload all databases and return to normal chat, use `/new`.
             # Add any additional context (e.g., from local files)
             if additional_context:
                 relevant_context = f"{additional_context}\n\n---\n\n{relevant_context}"
+            
+            # Truncate context if it's too large to prevent context window overflow
+            # Most models have 128K token limit, but conversation history also counts
+            # Reserve space for conversation history (~20K tokens) and response (~4K tokens)
+            MAX_CONTEXT_TOKENS = 60000  # ~240K characters (safe limit for 128K token models)
+            max_context_chars = MAX_CONTEXT_TOKENS * 4
+            
+            if len(relevant_context) > max_context_chars:
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "system",
+                    f"⚠️ Context too large ({len(relevant_context):,} chars), truncating to {max_context_chars:,} chars to fit model limits..."
+                )
+                relevant_context = relevant_context[:max_context_chars] + "\n\n[... Context truncated due to size ...]"
             
             # Generate answer using the chatbot with the retrieved context
             qa_prompt = f"""User Question: {question}
@@ -5850,7 +6819,15 @@ Cite sources when possible."""
             self.app.call_from_thread(self._set_processing_state, False)
     
     def _send_chat_message_in_thread(self, message: str):
-        """Send a message to the chatbot (runs in background thread)."""
+        """Send a message to the chatbot (runs in background thread).
+        
+        File Handling:
+        - When files are referenced in chat, they are detected and loaded into
+          context_manager using context_management.py (same as /context command)
+        - Files are read with chonkie chunking and proper formatting
+        - File content persists in conversation history for follow-up questions
+        - No separate tool-based file reading to avoid confusion
+        """
         # Reset cancellation flag at the start of a new message
         self._cancel_streaming = False
         
@@ -5867,74 +6844,32 @@ ChatBot is not ready. Please check your configuration.
             return
         
         # Check if the message references local files first (always check this)
-        should_use_tools = False
         detected_files = []
         if self.chatbot.agent_model:
-            should_use_tools, detected_files = self.chatbot._should_use_tools(message)
+            _, detected_files = self.chatbot._should_use_tools(message)
             
-            # Add detected files to context chip bar
+            # Add detected files to context chip bar AND load into context manager
             if detected_files:
                 for file_path in detected_files:
                     self.app.call_from_thread(self._context_chip_bar.add_file, file_path)
+                
+                # Load files into context manager using context_management.py
+                # This ensures files are read with chonkie chunking and proper formatting
+                try:
+                    self.chatbot.context_manager.load_context(detected_files, silent=True)
+                except Exception as e:
+                    # Log error but don't fail the request
+                    error_msg = f"⚠️ Warning: Failed to load file(s) into context: {str(e)}"
+                    self.app.call_from_thread(self._add_system_message, error_msg)
         
         # Check if RAG database is active
         has_active_database = hasattr(self, '_active_rag_kb') and self._active_rag_kb
         
         # If local files are detected AND database is active, combine both
-        if should_use_tools and has_active_database:
-            # Show indicator that we're loading files AND searching database
-            chat_panel = self.query_one("#chat-panel", ChatPanel)
-            num_files = len(detected_files)
-            file_word = "file" if num_files == 1 else "files"
-            num_dbs = len(self._active_rag_kb)
-            db_word = "database" if num_dbs == 1 else "databases"
-            
-            # Load the local files first to get their content
-            from pathlib import Path
-            file_contents = []
-            for file_path in detected_files:
-                try:
-                    path = Path(file_path)
-                    if path.exists() and path.is_file():
-                        content = path.read_text(encoding='utf-8', errors='ignore')
-                        file_contents.append(f"### Local File: {file_path}\n\n```\n{content}\n```")
-                except Exception as e:
-                    file_contents.append(f"### Local File: {file_path}\n\nError reading file: {str(e)}")
-            
-            # Combine file contents into additional context
-            additional_context = "\n\n---\n\n".join(file_contents) if file_contents else ""
-            
-            # Handle RAG query with additional local file context
-            self._handle_rag_query(message, additional_context)
-            return
-        
-        # If local files are detected but NO database, use tool-based processing
-        if should_use_tools:
-            # Set processing state in UI thread
-            self.app.call_from_thread(self._set_processing_state, True)
-            
-            # Add loading indicator in chat
-            self.app.call_from_thread(self._add_loading_message)
-            
-            try:
-                # Use tool-enabled agent to handle local files
-                self._send_with_tools(message)
-            except Exception as e:
-                # Remove loading indicator on error
-                self.app.call_from_thread(self._remove_loading_message)
-                
-                error_message = f"""### {EMOJI['cross']} Error
-
-An error occurred while processing your message:
-
-```
-{str(e)}
-```
-"""
-                self.app.call_from_thread(self._add_error_message, error_message)
-            finally:
-                # Reset processing state
-                self.app.call_from_thread(self._set_processing_state, False)
+        if detected_files and has_active_database:
+            # Files are already loaded into context manager above
+            # Now handle RAG query which will include the file context automatically
+            self._handle_rag_query(message)
             return
         
         # Check if RAG database is active (and no local files) - handle with RAG only
@@ -5949,7 +6884,8 @@ An error occurred while processing your message:
         self.app.call_from_thread(self._add_loading_message)
         
         try:
-            # No local files and no RAG - use standard chat
+            # Use standard chat (files already loaded into context_manager if detected above)
+            # This handles: no files + no RAG, or files detected + no RAG
             self._send_standard_message_sync(message)
                 
         except Exception as e:
@@ -6314,8 +7250,9 @@ Falling back to standard chat...
             self._streaming_msg = ChatMessage("assistant", content, show_header=show_header)
             chat_panel.mount(self._streaming_msg)
         else:
-            # Update the content attribute
+            # Update both content and original_content attributes
             self._streaming_msg.content = content
+            self._streaming_msg.original_content = content  # Ensure original_content is updated
             # Find and update the Markdown widget(s) inside the message
             try:
                 markdown_widgets = self._streaming_msg.query(".message-content")
@@ -6338,13 +7275,24 @@ Falling back to standard chat...
         if hasattr(self, '_streaming_msg') and self._streaming_msg:
             # Store reference to the message for later processing
             final_msg = self._streaming_msg
-            # Use the simplified single-phase approach
+            final_content = final_msg.original_content if hasattr(final_msg, 'original_content') else final_msg.content
+            final_agent_name = final_msg.agent_name if hasattr(final_msg, 'agent_name') else None
+            
+            # Use the simplified single-phase approach for copy buttons
             chat_panel = self.query_one("#chat-panel", ChatPanel)
             self.app.call_later(chat_panel._add_copy_buttons_to_message, final_msg)
+            
+            # Autosave the final complete assistant response
+            # We're already on the main thread (called via call_from_thread), so use create_task directly
+            asyncio.create_task(self._autosave_message("assistant", final_content, final_agent_name))
         
         # Clear the streaming message reference
         if hasattr(self, '_streaming_msg'):
             self._streaming_msg = None
+        
+        # Reset autosave tracking for next response
+        self._last_autosave_content = ""
+
 
     
     async def action_new_chat(self):
@@ -6381,13 +7329,23 @@ Falling back to standard chat...
         # Clear messages (this should now catch any lingering agent messages)
         chat_panel.clear_messages()
         
+        # Reset session file tracking for new conversation
+        self._current_session_file = None
+        self._session_start_time = None
+        self._session_initialized = False
+        self._last_autosave_content = ""
+        self._first_user_input = None  # Reset first user input for new session
+        
         # Unload any active RAG databases
         if hasattr(self, '_active_rag_kb') and self._active_rag_kb is not None:
             self._active_rag_kb = None
         
         # Clear context chip bar
-        if hasattr(self, '_context_chip_bar'):
-            self._context_chip_bar.clear_all()
+        try:
+            context_chip_bar = self.query_one("#context-chip-bar", ContextChipBar)
+            context_chip_bar.clear_all()
+        except Exception:
+            pass
         
         # Clear any streaming message reference
         if hasattr(self, '_streaming_msg'):
@@ -6413,6 +7371,13 @@ Falling back to standard chat...
         
         # Show welcome message again
         self.show_welcome_message()
+        
+        # Auto-focus the text input area
+        try:
+            command_input = self.query_one("#command-input", CommandInput)
+            command_input.focus()
+        except Exception:
+            pass
         
         # Notify user if an agent was cancelled via toast
         if agent_was_active:
@@ -6463,6 +7428,21 @@ Falling back to standard chat...
             file_tree = self.query_one("#file-tree", DirectoryTree)
             file_tree.focus()
     
+    def action_toggle_history(self):
+        """Toggle the chat history panel visibility."""
+        history_panel = self.query_one("#history-panel", ChatHistoryPanel)
+        if self.show_history:
+            history_panel.remove_class("visible")
+            self.show_history = False
+        else:
+            history_panel.add_class("visible")
+            self.show_history = True
+            # Refresh the tree to show new entries
+            history_panel.refresh_history()
+            # Focus the history tree when opening the panel
+            history_tree = self.query_one("#history-tree", ChatHistoryTree)
+            history_tree.focus()
+    
     async def action_change_model(self):
         """Prompt to change the AI model with inline picker."""
         async def handle_model_selection(selected_model):
@@ -6495,49 +7475,24 @@ Falling back to standard chat...
         # Store callback for when selection is made (after picker is shown)
         self._picker_callback = handle_model_selection
     
-    def action_save_session(self):
-        """Save the current chat session to a log file."""
-        chat_panel = self.query_one("#chat-panel", ChatPanel)
-        
-        try:
-            # Generate filename with timestamp
-            now = datetime.now()
-            timestamp = now.strftime("%Y%m%d_%H%M%S")
-            log_filename = f"chatlog_{timestamp}.log"
-            log_filepath = Path.cwd() / log_filename
-            
-            # Collect all messages from the chat panel
-            with open(log_filepath, 'w', encoding='utf-8') as f:
-                f.write(f"ValBot Chat Log\n")
-                f.write(f"Saved: {now.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write("=" * 80 + "\n\n")
-                
-                for msg in chat_panel.messages:
-                    # Get role and format it
-                    role = msg.role.upper()
-                    agent_info = f" ({msg.agent_name})" if hasattr(msg, 'agent_name') and msg.agent_name else ""
-                    
-                    f.write(f"[{role}{agent_info}]\n")
-                    f.write(msg.content)
-                    f.write("\n\n" + "-" * 80 + "\n\n")
-            
-            # Show success message
-            chat_panel.add_message("system", f"✅ Chat saved to `{log_filepath}`")
-            
-        except Exception as e:
-            chat_panel.add_message("error", f"{EMOJI['cross']} Failed to save chat: {str(e)}")
-    
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
         """Handle click on a file in the directory tree.
         
         Single-click behavior:
-        - Click on file: Adds path to chat and closes file explorer
+        - Click on file in file explorer: Adds path to chat and closes file explorer
+        - Click on file in history panel: Loads that chat history
         """
         # Only process if it's actually a file (not a directory)
         if not event.path.is_file():
             return
         
-        # Add file to chat immediately
+        # Check if this is from the history tree by checking the control/node that sent the event
+        if isinstance(event.control, ChatHistoryTree) or isinstance(event.node.tree, ChatHistoryTree):
+            # Load chat history
+            self._load_chat_history(event.path)
+            return
+        
+        # Otherwise, it's from the file explorer - add file to chat
         file_path = event.path
         try:
             # Convert to relative path from current directory
@@ -6570,6 +7525,123 @@ Falling back to standard chat...
             command_input.insert(str(file_path))
             self.action_toggle_files()
             command_input.focus()
+    
+    def _load_chat_history(self, history_file: Path) -> None:
+        """Load a chat history file and restore the conversation."""
+        try:
+            chat_panel = self.query_one("#chat-panel", ChatPanel)
+            
+            # Read the log file
+            with open(history_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Parse the log file format
+            # Format: [timestamp] ROLE:\ncontent\n----\n\n
+            import re
+            
+            # First, remove the header section (everything before the first message)
+            # Header format: ValBot TUI Chat Log\nSession Started: ...\n====\n\n
+            header_end = content.find('=' * 80)
+            if header_end != -1:
+                content = content[header_end + 80:]  # Skip past the header separator
+            
+            # Split by the separator line (80 dashes)
+            sections = content.split('-' * 80)
+            
+            messages = []
+            for section in sections:
+                section = section.strip()
+                if not section:
+                    continue
+                
+                # Match pattern: [timestamp] ROLE:\ncontent
+                # Use a more flexible pattern that allows for optional newlines
+                match = re.match(r'\[([^\]]+)\]\s+([^:]+):\s*(.*)', section, re.DOTALL)
+                if match:
+                    timestamp = match.group(1)
+                    role_label = match.group(2).strip()
+                    message_content = match.group(3).strip()
+                    
+                    # Parse role and agent name if present
+                    agent_name = None
+                    if '(Agent:' in role_label:
+                        # Extract agent name from "ASSISTANT (Agent: name)"
+                        role_match = re.match(r'(\w+)\s*\(Agent:\s*([^)]+)\)', role_label)
+                        if role_match:
+                            role = role_match.group(1).lower()
+                            agent_name = role_match.group(2).strip()
+                        else:
+                            role = role_label.split('(')[0].strip().lower()
+                    else:
+                        role = role_label.lower()
+                    
+                    messages.append({
+                        'role': role,
+                        'content': message_content,
+                        'agent_name': agent_name
+                    })
+            
+            # Start a new chat (clears everything)
+            import asyncio
+            asyncio.create_task(self.action_new_chat())
+            
+            # Wait a moment for new chat to complete, then load messages
+            def load_messages():
+                # Clear the welcome message
+                chat_panel.clear_messages()
+                
+                # Add all messages to chat panel
+                for msg in messages:
+                    chat_panel.add_message(
+                        role=msg['role'],
+                        content=msg['content'],
+                        agent_name=msg['agent_name']
+                    )
+                
+                # Also add to conversation history for context
+                if self.chatbot:
+                    # Clear existing history (keep only system prompt)
+                    system_prompt = None
+                    if self.chatbot.context_manager.conversation_history:
+                        for msg in self.chatbot.context_manager.conversation_history:
+                            if msg.get('role') == 'system':
+                                system_prompt = msg
+                                break
+                    
+                    # Reset to only system prompt
+                    self.chatbot.context_manager.conversation_history.clear()
+                    if system_prompt:
+                        self.chatbot.context_manager.conversation_history.append(system_prompt)
+                    
+                    # Add all messages to conversation history
+                    for msg in messages:
+                        self.chatbot.context_manager.conversation_history.append({
+                            'role': msg['role'],
+                            'content': msg['content']
+                        })
+                
+                # Set the current session file to the loaded history file
+                # so new messages continue in the same file
+                self._current_session_file = history_file
+                self._session_initialized = True
+                self._session_start_time = datetime.now()
+                self._first_user_input = None  # Already has messages, don't need to track first input
+                self._last_autosave_content = ""  # Reset tracking
+                
+                # Close the history panel
+                self.action_toggle_history()
+                
+                # Show success message
+                self.app.notify(f"✅ Loaded chat history: {history_file.stem}", severity="information", timeout=3)
+            
+            # Schedule loading after a short delay to let new_chat complete
+            self.set_timer(0.3, load_messages)
+            
+        except Exception as e:
+            # Show error message
+            chat_panel = self.query_one("#chat-panel", ChatPanel)
+            chat_panel.add_message("error", f"❌ Failed to load chat history: {str(e)}\n\n```\n{traceback.format_exc()}\n```")
+            self.action_toggle_history()
 
 
 class ValbotTUI(App):
@@ -6660,10 +7732,23 @@ class ValbotTUI(App):
     def watch_theme(self, new_theme: str) -> None:
         """Watch for theme changes and save to config file."""
         save_theme_config(new_theme)
-        
+    
     def on_mount(self) -> None:
         """Set up the application after mounting."""
-        self.push_screen(MainScreen(self.config_manager))
+        # Check if history configuration exists
+        history_config = load_history_config()
+        
+        if history_config is None:
+            # Show configuration screen with callback to continue
+            def on_config_complete(result):
+                # Result doesn't matter - config was saved either way
+                # Now show the main screen
+                self.push_screen(MainScreen(self.config_manager))
+            
+            self.push_screen(HistoryConfigScreen(), callback=on_config_complete)
+        else:
+            # Config exists, go directly to main screen
+            self.push_screen(MainScreen(self.config_manager))
 
 
 def main():

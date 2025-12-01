@@ -224,7 +224,8 @@ if IS_LINUX:
         'lightning': '⚡',
         'agent': '◈',
         'chat' : '◷',
-        'link': '⎅ ◨ ☍ ⎘ ⚭ ⚯',
+        # 'link': '⎅ ◨ ☍ ⎘ ⚭ ⚯',
+        'link': '⎘',
     }
 else:
     # Unicode emojis for Windows/Mac
@@ -2613,7 +2614,7 @@ class StatusBar(Container):
         dock: left;
         min-width: 5;
         background: transparent !important;
-        content-align: center bottom;
+        content-align: center middle;
         text-style: none;
         border: none !important;
     }
@@ -2624,7 +2625,7 @@ class StatusBar(Container):
         background: transparent !important;
         padding: 0 2;
         margin: 0 0;
-        content-align: center bottom;
+        content-align: center middle;
         text-style: none;
         border: none !important;
     }

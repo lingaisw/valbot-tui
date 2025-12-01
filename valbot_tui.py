@@ -2545,7 +2545,7 @@ class ChatHistoryPanel(Container):
         """Compose the chat history panel."""
         # Header with gear button (config) and close button at top right
         with Horizontal(id="history-header"):
-            yield Button("⛯", id="history-config-btn", variant="primary")
+            yield Button(EMOJI['gear'], id="history-config-btn", variant="primary")
             yield Button("✕", id="history-close-btn", variant="primary")
         
         # Get history directory from config

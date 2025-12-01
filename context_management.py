@@ -1,5 +1,6 @@
 import glob
 import os
+import gzip
 import PyPDF2
 import shlex
 try:
@@ -7,6 +8,26 @@ try:
     CHONKIE_AVAILABLE = True
 except ImportError:
     CHONKIE_AVAILABLE = False
+
+
+def open_file_smart(file_path, mode='r', **kwargs):
+    """
+    Open regular or .gz compressed files transparently.
+    
+    Args:
+        file_path: Path to file (can be .gz compressed)
+        mode: File open mode ('r', 'rb', etc.)
+        **kwargs: Additional arguments passed to open/gzip.open
+        
+    Returns:
+        File handle for reading
+    """
+    if file_path.endswith('.gz'):
+        # For text mode, ensure we use text mode with gzip
+        if 'b' not in mode:
+            return gzip.open(file_path, mode + 't', **kwargs)
+        return gzip.open(file_path, mode, **kwargs)
+    return open(file_path, mode, **kwargs)
 
 
 # --- Token Counting Utility ---
@@ -50,10 +71,21 @@ class ContextManager:
                 '.txt', '.md', '.py', '.js', '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.go',
                 '.rs', '.rb', '.php', '.json', '.xml', '.yaml', '.yml', '.csv', '.log',
                 '.sh', '.bash', '.sql', '.html', '.css', '.scss', '.ts', '.jsx', '.tsx',
-                '.pdf'  # PDFs are handled specially
+                '.pdf',  # PDFs are handled specially
+                '.gz'    # Compressed files (.txt.gz, .log.gz, etc.)
             ]
         
         file_ext = os.path.splitext(file_path)[1].lower()
+        
+        # For .gz files, check the underlying file type
+        if file_ext == '.gz':
+            # Check if there's a file extension before .gz (e.g., .txt.gz)
+            base_name = os.path.splitext(file_path[:-3])[1].lower()  # Remove .gz and check
+            if base_name and base_name not in allowed_extensions:
+                self.console.print(f"[bold red]Error:[/bold red] Compressed file '{os.path.basename(file_path)}' contains unsupported type '{base_name}'.")
+                return False
+            # .gz is allowed, will be decompressed transparently
+            return True
         
         # Check if file extension is in allowed list
         if file_ext not in allowed_extensions:
@@ -64,8 +96,8 @@ class ContextManager:
                 self.console.print(f"[yellow]Excel files are not supported for context loading.[/yellow]")
             elif file_ext in ['.exe', '.dll', '.bin', '.so', '.dylib']:
                 self.console.print(f"[yellow]Binary executable files cannot be loaded.[/yellow]")
-            elif file_ext in ['.zip', '.rar', '.7z', '.tar', '.gz']:
-                self.console.print(f"[yellow]Compressed archive files are not supported.[/yellow]")
+            elif file_ext in ['.zip', '.rar', '.7z', '.tar']:
+                self.console.print(f"[yellow]Archive files (except .gz) are not supported.[/yellow]")
             elif file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg']:
                 self.console.print(f"[yellow]Image files cannot be loaded as text.[/yellow]")
             elif file_ext in ['.mp3', '.mp4', '.avi', '.mov', '.wav']:
@@ -154,12 +186,26 @@ class ContextManager:
 
     def read_context_file(self, file, max_size_mb=50):
         """Read content from a file, handling both text and PDF formats with size limits.
-        Uses chonkie for intelligent document chunking when available."""
+        Uses chonkie for intelligent document chunking when available.
+        Supports .gz compressed files transparently."""
         # Validate file type first
         if not self._validate_file_type(file):
             raise ValueError(f"Unsupported file type: {file}")
         
-        if file.endswith('.pdf'):
+        # Check if this is a compressed PDF
+        if file.endswith('.pdf.gz'):
+            # Decompress PDF first, then pass to PDF reader
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp_file:
+                tmp_path = tmp_file.name
+                with gzip.open(file, 'rb') as gz_file:
+                    tmp_file.write(gz_file.read())
+            try:
+                result = self.read_context_pdf(tmp_path)
+                return result
+            finally:
+                os.unlink(tmp_path)
+        elif file.endswith('.pdf'):
             return self.read_context_pdf(file)
         else:
             try:
@@ -169,7 +215,7 @@ class ContextManager:
                 
                 if file_size > max_size_bytes:
                     self.console.print(f"[yellow]Warning: File {file} is large ({file_size / (1024*1024):.2f} MB). Reading first {max_size_mb} MB...[/yellow]")
-                    with open(file, 'r', encoding='utf-8', errors='replace') as f:
+                    with open_file_smart(file, 'r', encoding='utf-8', errors='replace') as f:
                         content = f.read(max_size_bytes)
                     
                     # Use chonkie for better chunking if available
@@ -186,7 +232,7 @@ class ContextManager:
                         return content + f"\n\n[... File truncated at {max_size_mb} MB ...]"
                 
                 # Read full file
-                with open(file, 'r', encoding='utf-8', errors='replace') as f:
+                with open_file_smart(file, 'r', encoding='utf-8', errors='replace') as f:
                     content = f.read()
                 
                 # Use chonkie for semantic chunking if the file is reasonably large

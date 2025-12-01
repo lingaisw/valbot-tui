@@ -111,14 +111,16 @@ class ChatBot:
     def _setup_tool_agent(self):
         """Setup pydantic-ai agent with file and terminal tools."""
         system_prompt = (
-            'You are a helpful AI assistant with access to file system and terminal tools. '
+            'You are a helpful AI assistant with access to file system, terminal, and Excel database tools. '
             'You can help users:\n'
             '- List and search for files in directories\n'
             '- Read file contents (full or partial)\n'
             '- Create, edit, and write files\n'
             '- Search text within files using grep\n'
             '- Display directory tree structures\n'
-            '- Execute shell commands\n\n'
+            '- Execute shell commands\n'
+            '- Query Excel databases for file lists, sheets, schemas, and sample data\n\n'
+            'When users ask about Excel files, sheets, columns, or data structure, use the Excel database tools. '
             'When users ask about files or want to execute commands, use the appropriate tools. '
             'Always provide clear, helpful responses. Prioritize markdown format and code blocks when applicable.'
         )
@@ -144,6 +146,14 @@ class ChatBot:
         self.tool_agent.tool(edit_string_in_file)
         self.tool_agent.tool(list_files_in_directory)
         self.tool_agent.tool(find_files_with_name)
+        
+        # Register Excel database tools
+        try:
+            from agent_plugins.common_tools.excel_database_tools import EXCEL_DATABASE_TOOLS
+            for tool_info in EXCEL_DATABASE_TOOLS:
+                self.tool_agent.tool(tool_info['function'])
+        except ImportError:
+            pass  # Excel tools not available
 
 
     def display_banner(self):
@@ -192,12 +202,13 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
         
         # Look for potential file paths (with extensions or absolute/relative paths)
         # Match patterns like: ./file.txt, ../dir/file.py, C:\path\file.js, /path/to/file, file.md, agent_plugins/init.py
+        # Also supports .gz compressed files like file.log.gz, document.pdf.gz
         file_path_patterns = [
-            r'[./\\][\w/\\.-]+\.\w+',      # Relative paths starting with . or \ with extension
-            r'[A-Za-z]:\\[\w\\.-]+',        # Windows absolute paths
-            r'/[\w/.-]+',                   # Unix-like absolute paths
-            r'\b[\w-]+(?:[/\\][\w-]+)+\.\w+', # Subdirectory paths (word/word/file.ext)
-            r'(?<![/\\])(?<!\w)\b[\w-]+\.\w{2,5}\b(?![/\\])'  # Simple filenames not part of a path
+            r'[./\\][\w/\\.-]+(?:\.\w+)+',      # Relative paths starting with . or \ with extension(s) - supports .log.gz
+            r'[A-Za-z]:\\[\w\\.-]+',             # Windows absolute paths
+            r'/[\w/.-]+',                        # Unix-like absolute paths
+            r'\b[\w-]+(?:[/\\][\w-]+)+(?:\.\w+)+', # Subdirectory paths (word/word/file.ext) - supports .log.gz
+            r'(?<![/\\])(?<!\w)\b[\w-]+(?:\.\w{2,5})+\b(?![/\\])'  # Simple filenames - supports file.txt.gz
         ]
         
         potential_paths = []

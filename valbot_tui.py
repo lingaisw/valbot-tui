@@ -83,6 +83,7 @@ import asyncio
 import sys
 import re
 import glob
+import gzip
 import json
 import shlex
 from datetime import datetime
@@ -99,7 +100,7 @@ from textual.screen import Screen
 from textual.theme import Theme
 from textual.widgets import (
     Header, Input, Static, Button, 
-    DirectoryTree, Label, Markdown, RichLog, TabbedContent, TabPane, TextArea, OptionList
+    DirectoryTree, Label, Markdown, RichLog, TabbedContent, TabPane, TextArea, OptionList, ProgressBar
 )
 from textual.widgets.option_list import Option
 from textual.widgets._directory_tree import DirEntry
@@ -118,6 +119,27 @@ from openai.types.responses import (
     ResponseAudioDeltaEvent,
     ResponseTextDeltaEvent
 )
+
+
+def open_file_smart(file_path, mode='r', **kwargs):
+    """
+    Open regular or .gz compressed files transparently.
+    
+    Args:
+        file_path: Path to file (can be .gz compressed or Path object)
+        mode: File open mode ('r', 'rb', etc.)
+        **kwargs: Additional arguments passed to open/gzip.open
+        
+    Returns:
+        File handle for reading
+    """
+    file_str = str(file_path)  # Convert Path objects to string
+    if file_str.endswith('.gz'):
+        # For text mode, ensure we use text mode with gzip
+        if 'b' not in mode:
+            return gzip.open(file_str, mode + 't', **kwargs)
+        return gzip.open(file_str, mode, **kwargs)
+    return open(file_str, mode, **kwargs)
 
 from chatbot import ChatBot
 from config import ConfigManager
@@ -171,6 +193,14 @@ try:
 except ImportError:
     CHONKIE_AVAILABLE = False
 
+# Excel database imports
+try:
+    from excel_db_manager import ExcelDatabaseManager
+    from excel_db_tools import ExcelDatabaseTools, create_excel_tools_for_chatbot
+    EXCEL_DB_AVAILABLE = True
+except ImportError:
+    EXCEL_DB_AVAILABLE = False
+
 
 # Platform-specific emoji/symbol mapping
 print(sys.platform)
@@ -194,6 +224,7 @@ if IS_LINUX:
         'lightning': '⚡',
         'agent': '◈',
         'chat' : '◷',
+        'link': '⎅ ◨ ☍ ⎘ ⚭ ⚯',
     }
 else:
     # Unicode emojis for Windows/Mac
@@ -212,6 +243,7 @@ else:
         'lightning': '⚡',
         'agent': '🤖',
         'chat': '💬',
+        'link': '🔗',
     }
 
 
@@ -536,8 +568,8 @@ class RAGKnowledgeBase:
                 self.console.print(f"[yellow]Excel files are not supported for RAG database loading.[/yellow]")
             elif file_ext in ['.exe', '.dll', '.bin', '.so', '.dylib']:
                 self.console.print(f"[yellow]Binary executable files cannot be loaded.[/yellow]")
-            elif file_ext in ['.zip', '.rar', '.7z', '.tar', '.gz']:
-                self.console.print(f"[yellow]Compressed archive files are not supported.[/yellow]")
+            elif file_ext in ['.zip', '.rar', '.7z', '.tar']:
+                self.console.print(f"[yellow]Archive files (except .gz) are not supported.[/yellow]")
             elif file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg']:
                 self.console.print(f"[yellow]Image files cannot be loaded as text.[/yellow]")
             elif file_ext in ['.mp3', '.mp4', '.avi', '.mov', '.wav']:
@@ -551,39 +583,87 @@ class RAGKnowledgeBase:
         return True
     
     def extract_text_from_pdf(self, pdf_path: Path) -> str:
-        """Extract all text from a PDF file."""
+        """Extract all text from a PDF file (supports .pdf and .pdf.gz)."""
         try:
-            with open(pdf_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
-                text = ""
-                for page_num in range(len(pdf_reader.pages)):
-                    page = pdf_reader.pages[page_num]
-                    page_text = page.extract_text()
-                    if page_text:
-                        text += page_text + "\n"
-                return text
+            # Check if it's a .gz compressed PDF
+            if str(pdf_path).endswith('.pdf.gz'):
+                import tempfile
+                # Decompress to temporary file
+                with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp_file:
+                    tmp_path = tmp_file.name
+                    with gzip.open(str(pdf_path), 'rb') as gz_file:
+                        tmp_file.write(gz_file.read())
+                try:
+                    with open(tmp_path, 'rb') as file:
+                        pdf_reader = PyPDF2.PdfReader(file)
+                        text = ""
+                        for page_num in range(len(pdf_reader.pages)):
+                            page = pdf_reader.pages[page_num]
+                            page_text = page.extract_text()
+                            if page_text:
+                                text += page_text + "\n"
+                        return text
+                finally:
+                    import os
+                    os.unlink(tmp_path)
+            else:
+                # Regular PDF file
+                with open(pdf_path, 'rb') as file:
+                    pdf_reader = PyPDF2.PdfReader(file)
+                    text = ""
+                    for page_num in range(len(pdf_reader.pages)):
+                        page = pdf_reader.pages[page_num]
+                        page_text = page.extract_text()
+                        if page_text:
+                            text += page_text + "\n"
+                    return text
         except Exception as e:
             self.console.print(f"[red]Error extracting text from {pdf_path.name}: {e}[/red]")
             return ""
     
     def extract_text_from_docx(self, docx_path: Path) -> str:
-        """Extract all text from a .docx file."""
+        """Extract all text from a .docx file (supports .docx and .docx.gz)."""
         if DocxDocument is None:
             self.console.print(f"[yellow]⚠ python-docx not installed. Install with: pip install python-docx[/yellow]")
             return ""
         
         try:
-            doc = DocxDocument(str(docx_path))
-            text = ""
-            for paragraph in doc.paragraphs:
-                text += paragraph.text + "\n"
-            # Also extract text from tables
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        text += cell.text + " "
-                text += "\n"
-            return text
+            # Check if it's a .gz compressed DOCX
+            if str(docx_path).endswith('.docx.gz'):
+                import tempfile
+                # Decompress to temporary file
+                with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp_file:
+                    tmp_path = tmp_file.name
+                    with gzip.open(str(docx_path), 'rb') as gz_file:
+                        tmp_file.write(gz_file.read())
+                try:
+                    doc = DocxDocument(tmp_path)
+                    text = ""
+                    for paragraph in doc.paragraphs:
+                        text += paragraph.text + "\n"
+                    # Also extract text from tables
+                    for table in doc.tables:
+                        for row in table.rows:
+                            for cell in row.cells:
+                                text += cell.text + " "
+                        text += "\n"
+                    return text
+                finally:
+                    import os
+                    os.unlink(tmp_path)
+            else:
+                # Regular DOCX file
+                doc = DocxDocument(str(docx_path))
+                text = ""
+                for paragraph in doc.paragraphs:
+                    text += paragraph.text + "\n"
+                # Also extract text from tables
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            text += cell.text + " "
+                    text += "\n"
+                return text
         except Exception as e:
             self.console.print(f"[red]Error extracting text from {docx_path.name}: {e}[/red]")
             return ""
@@ -696,11 +776,11 @@ class RAGKnowledgeBase:
         
         # Read text file
         try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open_file_smart(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 text = f.read()
         except UnicodeDecodeError:
             self.console.print(f"[bold red]Error:[/bold red] Unable to read '{file_path.name}' as text. This appears to be a binary file.")
-            self.console.print(f"[yellow]Supported formats:[/yellow] Text-based files only (.txt, .md, .py, .json, etc.)")
+            self.console.print(f"[yellow]Supported formats:[/yellow] Text-based files only (.txt, .md, .py, .json, etc., also .gz compressed)")
             return
         except Exception as e:
             self.console.print(f"[red]Error reading {file_path.name}: {e}[/red]")
@@ -1840,6 +1920,54 @@ class ChatMessage(Container):
         pass
 
 
+class DatabaseProgressWidget(Static):
+    """A custom widget to display database creation progress in the chat."""
+    
+    DEFAULT_CSS = """
+    DatabaseProgressWidget {
+        height: auto;
+        margin: 1 0;
+        padding: 1 2;
+        background: $surface;
+        border: solid $primary;
+    }
+    
+    DatabaseProgressWidget #progress-status {
+        width: 100%;
+        margin-bottom: 1;
+    }
+    
+    DatabaseProgressWidget #progress-bar {
+        width: 100%;
+    }
+    """
+    
+    def __init__(self, total: int, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.total = total
+        self.border_title = "📊 Database Creation Progress"
+        
+    def compose(self) -> ComposeResult:
+        """Compose the progress display."""
+        yield Label(f"Processing files... (0/{int(self.total/100)})", id="progress-status")
+        yield ProgressBar(total=self.total, show_eta=False, id="progress-bar")
+    
+    def update_progress(self, current: int, status: str):
+        """Update progress bar and status label."""
+        try:
+            progress_bar = self.query_one("#progress-bar", ProgressBar)
+            status_label = self.query_one("#progress-status", Label)
+            
+            # Update progress by setting the progress attribute directly
+            progress_bar.progress = current
+            progress_bar.refresh()
+            
+            # Update status text
+            status_label.update(status)
+        except Exception as e:
+            pass  # Widget might not be mounted yet
+
+
 class ChatTerminalOutput(Static):
     """A terminal output widget that displays inline in the chat with border."""
     
@@ -2469,25 +2597,34 @@ class ChatHistoryPanel(Container):
 
 
 class StatusBar(Container):
-    """Modern Material Design status bar with clickable model button."""
+    """Modern Material Design status bar with clickable files and model buttons."""
     
     DEFAULT_CSS = """
     StatusBar {
         dock: bottom;
         height: 3;
         background: $surface;
-        padding: 0 2;
+        padding: 1 2;
         layout: horizontal;
-        align: right middle;
+        align-vertical: bottom;
     }
     
-    StatusBar Button {
-        height: auto;
-        min-width: 15;
+    StatusBar #files-button {
+        dock: left;
+        min-width: 5;
+        background: transparent !important;
+        content-align: center bottom;
+        text-style: none;
+        border: none !important;
+    }
+    
+    StatusBar #model-button {
+        dock: right;
+        min-width: 10;
         background: transparent !important;
         padding: 0 2;
         margin: 0 0;
-        content-align: center middle;
+        content-align: center bottom;
         text-style: none;
         border: none !important;
     }
@@ -2502,7 +2639,8 @@ class StatusBar(Container):
         return model_name[:max_length - 3] + "..."
     
     def compose(self) -> ComposeResult:
-        """Compose the status bar with model button."""
+        """Compose the status bar with files button (left) and model button (right)."""
+        yield Button(EMOJI['link'], id="files-button")
         display_name = self._truncate_model_name(self.model_name)
         yield Button(f"{display_name} {EMOJI['gear']}", id="model-button")
     
@@ -2514,6 +2652,14 @@ class StatusBar(Container):
             button.label = f"{display_name} {EMOJI['gear']}"
         except Exception:
             pass
+    
+    @on(Button.Pressed, "#files-button")
+    def open_files_panel(self):
+        """Open files panel when button is clicked."""
+        # Get the main screen and toggle files
+        main_screen = self.screen
+        if hasattr(main_screen, 'action_toggle_files'):
+            main_screen.action_toggle_files()
     
     @on(Button.Pressed, "#model-button")
     async def open_model_picker(self):
@@ -3407,7 +3553,6 @@ class Sidebar(Container):
         """Compose the sidebar buttons."""
         yield Button(">", id="btn-expand", variant="default")
         yield Button("+", id="btn-new-chat", variant="default")
-        yield Button("◨", id="btn-files", variant="default")
         yield Button("◈", id="btn-agent", variant="default")
         yield Button("◷", id="btn-history", variant="default")
     
@@ -3422,7 +3567,6 @@ class Sidebar(Container):
             try:
                 self.query_one("#btn-expand", Button).label = "< Collapse"
                 self.query_one("#btn-new-chat", Button).label = f"+ New Chat"
-                self.query_one("#btn-files", Button).label = f"◨ Files"
                 self.query_one("#btn-agent", Button).label = f"◈ Agent"
                 self.query_one("#btn-history", Button).label = f"◷ History"
             except Exception:
@@ -3434,7 +3578,6 @@ class Sidebar(Container):
             try:
                 self.query_one("#btn-expand", Button).label = ">"
                 self.query_one("#btn-new-chat", Button).label = "+"
-                self.query_one("#btn-files", Button).label = "◨"
                 self.query_one("#btn-agent", Button).label = "◈"
                 self.query_one("#btn-history", Button).label = "◷"
             except Exception:
@@ -3456,11 +3599,6 @@ class Sidebar(Container):
     def handle_agent_button(self) -> None:
         """Handle agent button press."""
         self.post_message(SidebarButtonPressed("agent"))
-    
-    @on(Button.Pressed, "#btn-files")
-    def handle_files_button(self) -> None:
-        """Handle files button press."""
-        self.post_message(SidebarButtonPressed("files"))
     
     @on(Button.Pressed, "#btn-history")
     def handle_history_button(self) -> None:
@@ -4648,6 +4786,16 @@ Restarting TUI to reload configuration...
             if hasattr(self, '_active_rag_kb') and self._active_rag_kb is not None:
                 self._active_rag_kb = None
             
+            # Unload any active Excel databases
+            if hasattr(self, '_active_excel_db') and self._active_excel_db is not None:
+                # Close all database connections
+                for db_path, db_info in self._active_excel_db.items():
+                    try:
+                        db_info['manager'].close()
+                    except:
+                        pass
+                self._active_excel_db = None
+            
             # Clear context chip bar
             try:
                 context_chip_bar = self.query_one("#context-chip-bar", ContextChipBar)
@@ -4689,8 +4837,10 @@ Restarting TUI to reload configuration...
 - `/prompts` - Show available custom prompts
 - `/commands` - Show all available commands
 - `/settings` - Show settings (CLI mode only)
-- `/create_database <folder> <files>` - Create a RAG database (supports PDF, DOCX, XLSX, XLS, TXT, MD, etc.)
-- `/load_database <folder1> [folder2] ...` - Load one or more databases
+- `/create_database <folder> <files>` - Create a RAG database (PDF, DOCX, TXT, MD, etc.)
+- `/load_database <folder1> [folder2] ...` - Load RAG database(s)
+- `/create_excel_db <db_name> <files>` - Create Excel database (XLSX, XLS)
+- `/load_excel_db <db_path>` - Load Excel database for querying
 - `/quit` - Exit the application
 
 **Usage Tips:**
@@ -4698,7 +4848,8 @@ Restarting TUI to reload configuration...
 - Use `/` prefix for commands
 - Agent workflows provide specialized functionality
 - Context files are remembered throughout conversation
-- RAG databases enable Q&A with your documents (now includes Excel support!)
+- **RAG databases** enable Q&A with your documents
+- **Excel databases** enable efficient querying of large Excel files
 - Load multiple databases with space-separated paths
 - Click ✕ on database chips to unload specific databases
 - Use `/new` to unload all databases and start fresh
@@ -4777,6 +4928,7 @@ Error executing command `{cmd}`:
 - `/create_database <folder> <files>` - Create a searchable database
   - Example: `/create_database ./kb doc1.pdf doc2.txt notes.md data.xlsx`
   - Supports: PDF, DOCX, XLSX, XLS, TXT, MD, PDL, PY, C, CPP, H files
+  - Also supports .gz compressed files (.pdf.gz, .txt.gz, .log.gz, etc.)
   - Creates vector embeddings for semantic search
 - `/load_database <folder1> [folder2] ...` - Load one or more databases
   - Example: `/load_database ./kb` - Load single database
@@ -5126,15 +5278,22 @@ Default: vim (Linux/Mac) or notepad (Windows)
             chat_panel.add_message("user", f"`{command}`")
             # Create a new RAG database
             if not args:
-                chat_panel.add_message("system", """### 📚 Create RAG database
+                chat_panel.add_message("system", """### 📚 Create RAG Database
 
 **Usage**: `/create_database <output_folder> <file1> [file2] [file3] ...`
 
 **Example**:
-- `/create_database ./my_kb document1.pdf document2.docx notes.txt data.xlsx`
-- `/create_database C:/kb *.pdf *.txt *.xlsx`
+- `/create_database ./my_kb document1.pdf document2.docx notes.txt`
+- `/create_database C:/kb *.pdf *.txt`
 
-**Supported file types**: PDF, DOCX, XLSX, XLS, TXT, MD, PDL, PY, C, CPP, H
+**Supported file types**: PDF, DOCX, TXT, MD, PDL, PY, C, CPP, H
+**Compressed files**: All formats also support .gz compression (e.g., .pdf.gz, .txt.gz, .log.gz)
+
+**For Excel files (XLSX, XLS)**: Use the specialized Excel database instead:
+- `/create_excel_db <db_name> <file1.xlsx> [file2.xlsx] ...`
+- `/load_excel_db <db_name.db>`
+
+Excel databases are optimized for querying spreadsheet data without token limits!
 
 This will process your documents and create a searchable database with vector embeddings.
 The cache and database files will be stored in the output folder.
@@ -5146,6 +5305,72 @@ The cache and database files will be stored in the output folder.
                 thread = threading.Thread(
                     target=self._run_create_database_in_thread,
                     args=(args,),
+                    daemon=True
+                )
+                thread.start()
+            return True
+        
+        elif cmd == "/create_excel_db":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
+            # Create a new Excel database (SQLite-based for efficient querying)
+            if not args:
+                chat_panel.add_message("system", """### 📊 Create Excel Database
+
+**Usage**: `/create_excel_db <db_name> <file1.xlsx> [file2.xlsx] ...`
+
+**Example**:
+- `/create_excel_db my_excel_db data1.xlsx data2.xlsx`
+- `/create_excel_db C:/databases/reports *.xlsx`
+
+**Supported file types**: XLSX, XLS
+
+This will:
+1. Create a SQLite database with metadata about your Excel files
+2. Index all sheets, columns, row counts, and sample data
+3. Enable efficient querying without loading entire files into memory
+
+After creating, use `/load_excel_db` to query the data!
+""")
+            else:
+                # Run in background thread
+                import threading
+                thread = threading.Thread(
+                    target=self._run_create_excel_db_in_thread,
+                    args=(args,),
+                    daemon=True
+                )
+                thread.start()
+            return True
+        
+        elif cmd == "/load_excel_db":
+            # Display the user's command input in the chat with backtick formatting
+            chat_panel.add_message("user", f"`{command}`")
+            # Load an existing Excel database
+            if not args:
+                chat_panel.add_message("system", """### 📊 Load Excel Database
+
+**Usage**: `/load_excel_db <db_path>`
+
+**Example**:
+- `/load_excel_db my_excel_db.db`
+- `/load_excel_db C:/databases/reports.db`
+
+This will load the database and make Excel data queryable.
+After loading, you can ask natural questions like:
+- "What sheets are in the database?"
+- "Show me the columns in the Sales sheet"
+- "Find all rows where Status is 'FAIL'"
+- "What's the data in the first 5 rows of Test Results?"
+
+The AI will automatically use the appropriate tools to answer!
+""")
+            else:
+                # Run in background thread
+                import threading
+                thread = threading.Thread(
+                    target=self._run_load_excel_db_in_thread,
+                    args=(args.strip(),),
                     daemon=True
                 )
                 thread.start()
@@ -6352,16 +6577,32 @@ You can manually edit your configuration file at:
             file_paths_input = parts[1:]
             
             # Show initial message
+            total_files = len(file_paths_input)
             self.app.call_from_thread(
                 chat_panel.add_message,
                 "system",
                 f"""### {EMOJI['lightbulb']} Creating Database
 
 **Output folder**: `{output_folder}`
-**Input files**: {len(file_paths_input)} file(s)
-
-Processing documents..."""
+**Input files**: {total_files} file(s)"""
             )
+            
+            # Create a custom progress widget
+            # Calculate total steps: each file has ~5 sub-steps (read, parse, chunk, embed, store)
+            # This gives granular progress instead of jumping per file
+            STEPS_PER_FILE = 100  # Treat each file as 100 steps for smooth progress
+            total_steps = total_files * STEPS_PER_FILE
+            progress_widget = None
+            
+            def create_progress_ui():
+                nonlocal progress_widget
+                
+                # Create and mount the progress widget with total steps
+                progress_widget = DatabaseProgressWidget(total=total_steps)
+                chat_panel.mount(progress_widget)
+                chat_panel.scroll_end(animate=False)
+            
+            self.app.call_from_thread(create_progress_ui)
             
             # Check dependencies
             missing = []
@@ -6385,33 +6626,17 @@ pip install {' '.join(missing)}
                 self.app.call_from_thread(chat_panel.add_message, "error", error_msg)
                 return
             
-            # Create output folder
+            # Prepare output folder path (don't create yet - wait until we have valid files)
             output_path = Path(output_folder)
-            output_path.mkdir(parents=True, exist_ok=True)
-            
-            # Create a console wrapper to capture RAG output to TUI
-            import io
-            from rich.console import Console as RichConsole
-            
-            # Initialize RAG database with a StringIO console to suppress rich output
-            string_buffer = io.StringIO()
-            rag_console = RichConsole(file=string_buffer, force_terminal=True)
-            
-            rag_kb = RAGKnowledgeBase(
-                pdf_dir=output_path,
-                cache_dir=output_path / ".rag_cache",
-                chunk_size=1000,
-                chunk_overlap=200,
-                collection_name="rag_knowledge_base"
-            )
-            # Override the console to suppress rich output in thread
-            rag_kb.console = rag_console
+            folder_created = False
+            rag_kb = None
             
             # Process each file
             processed_count = 0
             failed_count = 0
+            current_step = 0  # Track overall progress in steps
             
-            for file_path_str in file_paths_input:
+            for idx, file_path_str in enumerate(file_paths_input, 1):
                 file_path = Path(file_path_str.strip())
                 
                 # If path is not absolute, resolve it relative to current working directory
@@ -6425,40 +6650,168 @@ pip install {' '.join(missing)}
                         f"{EMOJI['cross']} File not found: `{file_path_str}`\n\nSearched at: `{file_path}`\n\nMake sure the file exists or provide the full absolute path."
                     )
                     failed_count += 1
+                    # Update progress widget - skip this file's steps
+                    current_step += STEPS_PER_FILE
+                    if progress_widget:
+                        def update_failed():
+                            progress_widget.update_progress(current_step, f"✗ Failed: `{file_path.name}` ({idx}/{total_files}, {failed_count} errors)")
+                        self.app.call_from_thread(update_failed)
                     continue
                 
-                self.app.call_from_thread(
-                    chat_panel.add_message,
-                    "system",
-                    f"Processing: `{file_path.name}`..."
-                )
+                # Update status - starting file processing
+                if progress_widget:
+                    def update_starting():
+                        progress_widget.update_progress(current_step, f"⏳ Starting: `{file_path.name}` ({idx}/{total_files})")
+                    self.app.call_from_thread(update_starting)
                 
                 try:
                     suffix = file_path.suffix.lower()
                     
-                    # Process file directly from its location (no copying needed)
-                    if suffix == '.pdf':
-                        rag_kb.load_pdfs([str(file_path)], force_reload=True)
-                        processed_count += 1
-                    elif suffix == '.docx':
-                        rag_kb.load_docx_files([str(file_path)], force_reload=True)
-                    elif suffix in ['.txt', '.pdl', '.md', '.py', '.c', '.cpp', '.h']:
-                        rag_kb.load_text_file(file_path, force_reload=True)
-                    else:
+                    # Handle .gz compressed files - detect the underlying file type
+                    actual_suffix = suffix
+                    if suffix == '.gz':
+                        # Get the extension before .gz (e.g., .pdf from .pdf.gz)
+                        file_stem = file_path.stem  # filename without last extension
+                        if '.' in file_stem:
+                            actual_suffix = Path(file_stem).suffix.lower()
+                        else:
+                            # Just .gz with no underlying extension, treat as text
+                            actual_suffix = '.txt'
+                    
+                    # Check if this is an invalid file type
+                    if actual_suffix in ['.xlsx']:
                         self.app.call_from_thread(
                             chat_panel.add_message,
-                            "system",
-                            f"{EMOJI['cross']} Unsupported file type: `{suffix}`"
+                            "error",
+                            f"{EMOJI['cross']} Unsupported file type: `{actual_suffix}` for file `{file_path.name}`\n\nThis file type cannot be processed by the RAG database."
                         )
                         failed_count += 1
+                        current_step += STEPS_PER_FILE
+                        if progress_widget:
+                            def update_failed():
+                                progress_widget.update_progress(current_step, f"✗ Skipped: `{file_path.name}` ({idx}/{total_files}, {failed_count} errors)")
+                            self.app.call_from_thread(update_failed)
                         continue
                     
-                    processed_count += 1
-                    self.app.call_from_thread(
-                        chat_panel.add_message,
-                        "system",
-                        f"{EMOJI['checkmark']} Processed: `{file_path.name}`"
-                    )
+                    # Create folder and initialize RAG database on first valid file
+                    if not folder_created:
+                        output_path.mkdir(parents=True, exist_ok=True)
+                        folder_created = True
+                        
+                        # Create a console wrapper to capture RAG output to TUI
+                        import io
+                        from rich.console import Console as RichConsole
+                        
+                        # Initialize RAG database with a StringIO console to suppress rich output
+                        string_buffer = io.StringIO()
+                        rag_console = RichConsole(file=string_buffer, force_terminal=True)
+                        
+                        rag_kb = RAGKnowledgeBase(
+                            pdf_dir=output_path,
+                            cache_dir=output_path / ".rag_cache",
+                            chunk_size=1000,
+                            chunk_overlap=200,
+                            collection_name="rag_knowledge_base"
+                        )
+                        # Override the console to suppress rich output in thread
+                        rag_kb.console = rag_console
+                    
+                    # Helper function to update progress with sub-step info
+                    def update_substep(substep_num, substep_desc):
+                        """Update progress for a sub-step within file processing."""
+                        nonlocal current_step
+                        # Each sub-step is 20% of STEPS_PER_FILE (5 sub-steps total)
+                        current_step = (idx - 1) * STEPS_PER_FILE + (substep_num * 20)
+                        if progress_widget:
+                            def update_ui():
+                                progress_widget.update_progress(
+                                    current_step, 
+                                    f"⏳ {substep_desc}: `{file_path.name}` ({idx}/{total_files})"
+                                )
+                            self.app.call_from_thread(update_ui)
+                        # Add a small delay to make progress visible
+                        import time
+                        time.sleep(0.15)
+                    
+                    # Sub-step 1: Reading file
+                    update_substep(1, "Reading")
+                    
+                    # Process file directly from its location (no copying needed)
+                    # Use actual_suffix to determine file type (handles .gz transparently)
+                    if actual_suffix == '.pdf':
+                        # Sub-step 2: Parsing PDF
+                        update_substep(2, "Parsing PDF")
+                        
+                        # Sub-step 3: Chunking text
+                        update_substep(3, "Chunking text")
+                        
+                        # Sub-step 4: Generating embeddings
+                        update_substep(4, "Generating embeddings")
+                        
+                        rag_kb.load_pdfs([str(file_path)], force_reload=True)
+                        
+                        # Sub-step 5: Storing in database
+                        update_substep(5, "Storing in DB")
+                        
+                        processed_count += 1
+                    elif actual_suffix == '.docx':
+                        # Sub-step 2: Parsing DOCX
+                        update_substep(2, "Parsing DOCX")
+                        
+                        # Sub-step 3: Chunking text
+                        update_substep(3, "Chunking text")
+                        
+                        # Sub-step 4: Generating embeddings
+                        update_substep(4, "Generating embeddings")
+                        
+                        rag_kb.load_docx_files([str(file_path)], force_reload=True)
+                        
+                        # Sub-step 5: Storing in database
+                        update_substep(5, "Storing in DB")
+                        
+                        processed_count += 1
+                    elif actual_suffix in ['.txt', '.pdl', '.md', '.py', '.c', '.cpp', '.h']:
+                        # Sub-step 2: Reading text
+                        update_substep(2, "Reading text")
+                        
+                        # Sub-step 3: Chunking text
+                        update_substep(3, "Chunking text")
+                        
+                        # Sub-step 4: Generating embeddings
+                        update_substep(4, "Generating embeddings")
+                        
+                        rag_kb.load_text_file(file_path, force_reload=True)
+                        
+                        # Sub-step 5: Storing in database
+                        update_substep(5, "Storing in DB")
+                        
+                        processed_count += 1
+                    else:
+                        # Try to process as text file (default fallback for unknown types)
+                        # Sub-step 2: Reading text
+                        update_substep(2, "Reading text")
+                        
+                        # Sub-step 3: Chunking text
+                        update_substep(3, "Chunking text")
+                        
+                        # Sub-step 4: Generating embeddings
+                        update_substep(4, "Generating embeddings")
+                        
+                        rag_kb.load_text_file(file_path, force_reload=True)
+                        
+                        # Sub-step 5: Storing in database
+                        update_substep(5, "Storing in DB")
+                        
+                        processed_count += 1
+                    
+                    # Move to end of this file's progress
+                    current_step = idx * STEPS_PER_FILE
+                    
+                    # Update progress widget after successful processing
+                    if progress_widget:
+                        def update_success():
+                            progress_widget.update_progress(current_step, f"✓ Completed: `{file_path.name}` ({idx}/{total_files})")
+                        self.app.call_from_thread(update_success)
                     
                 except Exception as e:
                     self.app.call_from_thread(
@@ -6467,10 +6820,22 @@ pip install {' '.join(missing)}
                         f"{EMOJI['cross']} Error processing `{file_path.name}`: {str(e)}"
                     )
                     failed_count += 1
+                    
+                    # Update progress widget after error - skip remaining steps for this file
+                    current_step = idx * STEPS_PER_FILE
+                    if progress_widget:
+                        def update_error():
+                            progress_widget.update_progress(current_step, f"✗ Error: `{file_path.name}` ({idx}/{total_files}, {failed_count} errors)")
+                        self.app.call_from_thread(update_error)
             
-            # Display summary
-            stats = rag_kb.get_stats()
-            summary = f"""### {EMOJI['checkmark']} Database Created
+            # Remove progress widget
+            if progress_widget:
+                self.app.call_from_thread(progress_widget.remove)
+            
+            # Display summary only if at least one file was successfully processed
+            if processed_count > 0:
+                stats = rag_kb.get_stats()
+                summary = f"""### {EMOJI['checkmark']} Database Created
 
 **Summary**:
 - Files processed: {processed_count}
@@ -6483,10 +6848,21 @@ You can now load this database with:
 ```
 /load_database {output_folder}
 ```"""
-            
-            self.app.call_from_thread(chat_panel.add_message, "system", summary)
+                
+                self.app.call_from_thread(chat_panel.add_message, "system", summary)
+            # elif failed_count > 0:
+            #     # All files failed - show appropriate message
+            #     self.app.call_from_thread(
+            #         chat_panel.add_message,
+            #         "error",
+            #         f"{EMOJI['cross']} No files were successfully processed. All {failed_count} file(s) failed or were unsupported."
+            #     )
             
         except Exception as e:
+            # Remove progress widget on error
+            if 'progress_widget' in locals() and progress_widget:
+                self.app.call_from_thread(progress_widget.remove)
+            
             error_msg = f"""### {EMOJI['cross']} Error Creating database
 
 ```
@@ -6661,6 +7037,461 @@ To unload all databases and return to normal chat, use `/new`.
 
 {traceback.format_exc()}"""
             self.app.call_from_thread(chat_panel.add_message, "error", error_msg)
+    
+    def _run_create_excel_db_in_thread(self, args: str):
+        """Create a new Excel database (SQLite-based) for efficient querying."""
+        chat_panel = self.query_one("#chat-panel", ChatPanel)
+        
+        try:
+            # Check if Excel DB is available
+            if not EXCEL_DB_AVAILABLE:
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "error",
+                    f"""{EMOJI['cross']} Excel database modules not found.
+
+Make sure `excel_db_manager.py` and `excel_db_tools.py` exist in the project directory."""
+                )
+                return
+            
+            # Check pandas dependency
+            if pd is None:
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "error",
+                    f"""{EMOJI['cross']} Missing dependency: pandas
+
+Install with:
+```bash
+pip install pandas openpyxl
+```"""
+                )
+                return
+            
+            # Parse arguments: first is database name, rest are Excel files
+            parts = args.split()
+            if len(parts) < 2:
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "error",
+                    f"{EMOJI['cross']} Invalid arguments. Usage: `/create_excel_db <db_name> <file1.xlsx> [file2.xlsx] ...`"
+                )
+                return
+            
+            db_name = parts[0]
+            if not db_name.endswith('.db'):
+                db_name += '.db'
+            
+            file_patterns = parts[1:]
+            
+            # Show initial message
+            self.app.call_from_thread(
+                chat_panel.add_message,
+                "system",
+                f"""### {EMOJI['lightbulb']} Creating Excel Database
+
+**Database**: `{db_name}`
+**Input files**: {len(file_patterns)} pattern(s)
+
+Processing Excel files..."""
+            )
+            
+            # Expand file patterns (glob support)
+            import glob
+            excel_files = []
+            for pattern in file_patterns:
+                expanded = glob.glob(pattern)
+                if expanded:
+                    excel_files.extend(expanded)
+                elif os.path.exists(pattern):
+                    excel_files.append(pattern)
+            
+            if not excel_files:
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "error",
+                    f"{EMOJI['cross']} No Excel files found matching the patterns."
+                )
+                return
+            
+            self.app.call_from_thread(
+                chat_panel.add_message,
+                "system",
+                f"Found {len(excel_files)} Excel file(s) to index..."
+            )
+            
+            # Create database manager
+            db_manager = ExcelDatabaseManager(db_name)
+            
+            # Index each file
+            indexed_count = 0
+            failed_count = 0
+            
+            for excel_file in excel_files:
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "system",
+                    f"Indexing: `{Path(excel_file).name}`..."
+                )
+                
+                success = db_manager.index_excel_file(excel_file, sample_rows=10)
+                
+                if success:
+                    indexed_count += 1
+                    self.app.call_from_thread(
+                        chat_panel.add_message,
+                        "system",
+                        f"{EMOJI['checkmark']} Indexed: `{Path(excel_file).name}`"
+                    )
+                else:
+                    failed_count += 1
+                    self.app.call_from_thread(
+                        chat_panel.add_message,
+                        "error",
+                        f"{EMOJI['cross']} Failed: `{Path(excel_file).name}`"
+                    )
+            
+            db_manager.close()
+            
+            # Display summary
+            summary = f"""### {EMOJI['checkmark']} Excel Database Created
+
+**Summary**:
+- Files indexed: {indexed_count}
+- Files failed: {failed_count}
+- Database: `{db_name}`
+
+You can now load this database with:
+```
+/load_excel_db {db_name}
+```
+
+Then ask questions about your Excel data naturally!
+"""
+            
+            self.app.call_from_thread(chat_panel.add_message, "system", summary)
+            
+        except Exception as e:
+            error_msg = f"""### {EMOJI['cross']} Error Creating Excel Database
+
+```
+{str(e)}
+```
+
+{traceback.format_exc()}"""
+            self.app.call_from_thread(chat_panel.add_message, "error", error_msg)
+    
+    def _run_load_excel_db_in_thread(self, db_path: str):
+        """Load an existing Excel database and enable querying."""
+        chat_panel = self.query_one("#chat-panel", ChatPanel)
+        
+        try:
+            # Check if Excel DB is available
+            if not EXCEL_DB_AVAILABLE:
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "error",
+                    f"""{EMOJI['cross']} Excel database modules not found.
+
+Make sure `excel_db_manager.py` and `excel_db_tools.py` exist in the project directory."""
+                )
+                return
+            
+            # Show initial message
+            self.app.call_from_thread(
+                chat_panel.add_message,
+                "system",
+                f"""### {EMOJI['lightbulb']} Loading Excel Database
+
+Loading database from: `{db_path}`
+
+Please wait..."""
+            )
+            
+            # Check if database exists
+            if not os.path.exists(db_path):
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "error",
+                    f"{EMOJI['cross']} Database not found: `{db_path}`"
+                )
+                return
+            
+            # Initialize database manager
+            db_manager = ExcelDatabaseManager(db_path)
+            
+            # Get database stats
+            files = db_manager.list_files()
+            sheets = db_manager.list_sheets()
+            
+            if not files:
+                self.app.call_from_thread(
+                    chat_panel.add_message,
+                    "error",
+                    f"{EMOJI['cross']} Database is empty. No files indexed."
+                )
+                db_manager.close()
+                return
+            
+            # Close the database manager - we'll create new connections per query
+            db_manager.close()
+            
+            # Store database path (not the manager) to avoid SQLite threading issues
+            if not hasattr(self, '_active_excel_db'):
+                self._active_excel_db = {}
+            
+            self._active_excel_db[db_path] = {
+                'db_path': db_path,  # Store path instead of manager
+                'files': files,
+                'sheets': sheets
+            }
+            
+            # Add to chip bar
+            self.app.call_from_thread(self._context_chip_bar.add_database, f"Excel: {Path(db_path).name}")
+            
+            # Display summary
+            file_list = "\n".join([f"- `{Path(f['file_path']).name}`" for f in files[:10]])
+            if len(files) > 10:
+                file_list += f"\n- ... and {len(files) - 10} more"
+            
+            summary = f"""### {EMOJI['checkmark']} Excel Database Loaded
+
+**Summary**:
+- Files indexed: {len(files)}
+- Total sheets: {len(sheets)}
+- Database: `{db_path}`
+
+**Indexed files**:
+{file_list}
+
+**You can now ask questions about your Excel data!**
+
+Example questions:
+- "What sheets are available?"
+- "Show me the columns in the [sheet name] sheet"
+- "Get sample data from [sheet name]"
+- "Find all rows where [column] equals [value]"
+- "Search for [term] in the data"
+
+The AI will automatically use the appropriate tools to query your data!
+
+To unload this database, click the ✕ on its chip above or use `/new`.
+"""
+            
+            self.app.call_from_thread(chat_panel.add_message, "system", summary)
+            
+        except Exception as e:
+            error_msg = f"""### {EMOJI['cross']} Error Loading Excel Database
+
+```
+{str(e)}
+```
+
+{traceback.format_exc()}"""
+            self.app.call_from_thread(chat_panel.add_message, "error", error_msg)
+    
+    def _handle_excel_query(self, question: str):
+        """Handle a query to Excel database(s) using AI tools (runs in background thread)."""
+        chat_panel = self.query_one("#chat-panel", ChatPanel)
+        
+        try:
+            # Set processing state
+            self.app.call_from_thread(self._set_processing_state, True)
+            self.app.call_from_thread(self._add_loading_message)
+            
+            # Get database path
+            if not hasattr(self, '_active_excel_db') or not self._active_excel_db:
+                raise Exception("No Excel database loaded")
+            
+            db_path = list(self._active_excel_db.keys())[0]
+            
+            # Create database manager to get context
+            db_manager = ExcelDatabaseManager(db_path)
+            
+            # Get all available sheets with their structure
+            sheets_info = db_manager.list_sheets()
+            sheets_context = "**Available Sheets:**\n"
+            for sheet in sheets_info:
+                sheets_context += f"\n- **{sheet['sheet_name']}**: {sheet['row_count']} rows × {sheet['column_count']} columns"
+                # Get column info for this sheet
+                sheet_detail = db_manager.describe_sheet(sheet['sheet_name'])
+                if sheet_detail and 'columns' in sheet_detail:
+                    cols = [col['name'] for col in sheet_detail['columns'][:10]]  # First 10 columns
+                    sheets_context += f"\n  Columns: {', '.join(cols)}"
+                    if len(sheet_detail['columns']) > 10:
+                        sheets_context += f" ... (+{len(sheet_detail['columns']) - 10} more)"
+            
+            db_manager.close()
+            
+            # Build enhanced context for the AI
+            tools_context = f"""
+**Excel Database Information:**
+
+{sheets_context}
+
+**How to answer questions:**
+
+1. For questions about "what [items] are in [sheet]" or "what [items] are listed":
+   - First, look at sample data: get_sample_rows("[sheet_name]", limit=50)
+   - Identify which column contains the items (look for column names like "Test_Name", "Product", etc.)
+   - List the unique values you see in that column from the sample
+   - Note: Sample data shows the first rows, which gives you a good overview
+
+2. For questions about specific criteria (e.g., "failed tests", "errors"):
+   - Use search_values("[keyword]", sheet_name="[sheet]") to find matching rows
+   - Or describe_sheet() to understand the structure first
+
+3. For counting or statistics:
+   - get_column_stats() provides summary statistics
+   - query_sheet() can filter and count specific matches
+
+**Your Task:**
+User question: "{question}"
+
+**Action Plan:**
+1. Identify the relevant sheet name from the available sheets above
+2. Call get_sample_rows() with a higher limit (20-50) to see actual data
+3. Analyze the sample data to identify which column contains the answer
+4. Extract and present the relevant information from that column
+
+**Available Tools (call them in your response):**
+- get_sample_rows("sheet_name", limit=50)
+- describe_sheet("sheet_name")
+- search_values("search_term", sheet_name="sheet_name")
+- query_sheet("sheet_name", columns=["col1", "col2"])
+"""
+            
+            # Send message to chatbot with tools context
+            augmented_message = f"{tools_context}\n\nPlease answer the user's question using the available tools."
+            
+            # Add to conversation history
+            self.chatbot.context_manager.conversation_history.append({
+                "role": "user",
+                "content": augmented_message
+            })
+            
+            # Get response from chatbot using streaming API
+            self.app.call_from_thread(self._remove_loading_message)
+            
+            # Prepare streaming request
+            model_name = self.chatbot.modelname
+            messages = self.chatbot.context_manager.conversation_history
+            effort_level = self.config_manager.get_setting("chat_model_config.reasoning_effort", "low")
+            
+            kwargs = {
+                "model": model_name,
+                "input": messages,
+                "stream": True,
+            }
+            
+            if model_name.startswith("gpt-5"):
+                kwargs["reasoning"] = {"summary": "auto", "effort": effort_level}
+            
+            # Stream the response
+            stream = self.chatbot.client.responses.create(**kwargs)
+            
+            full_response = ""
+            first_response_received = False
+            
+            for event in stream:
+                if self._cancel_streaming:
+                    break
+                
+                if isinstance(event, ResponseTextDeltaEvent):
+                    if event.delta:
+                        # Remove loading on first response
+                        if not first_response_received:
+                            first_response_received = True
+                        
+                        full_response += event.delta
+                        
+                        # Update streaming message content
+                        self.app.call_from_thread(self._update_streaming_response, full_response)
+            
+            # Parse and execute any tool calls in the response
+            tool_results = self._execute_excel_tools_from_response(full_response)
+            
+            # If tools were executed, append results to the response
+            if tool_results:
+                full_response += "\n\n" + tool_results
+                self.app.call_from_thread(self._update_streaming_response, full_response)
+            
+            # Finalize the streaming response
+            self.app.call_from_thread(self._finalize_streaming_response)
+            
+            # Add to conversation history
+            self.chatbot.context_manager.conversation_history.append({
+                "role": "assistant",
+                "content": full_response
+            })
+            
+            # Autosave - schedule on main thread
+            def do_autosave():
+                asyncio.create_task(self._autosave_message("assistant", full_response))
+            
+            self.app.call_from_thread(do_autosave)
+            
+        except Exception as e:
+            self.app.call_from_thread(self._remove_loading_message)
+            error_msg = f"""### {EMOJI['cross']} Error Querying Excel Database
+
+```
+{str(e)}
+```
+
+{traceback.format_exc()}"""
+            self.app.call_from_thread(chat_panel.add_message, "error", error_msg)
+        finally:
+            self.app.call_from_thread(self._set_processing_state, False)
+    
+    def _execute_excel_tools_from_response(self, response: str) -> str:
+        """Parse AI response and execute any Excel tool calls."""
+        if not hasattr(self, '_active_excel_db') or not self._active_excel_db:
+            return ""
+        
+        import re
+        import ast
+        
+        # Get the first database path (for now, support single database)
+        db_path = list(self._active_excel_db.keys())[0]
+        
+        # Create a NEW database manager in this thread to avoid SQLite threading issues
+        db_manager = ExcelDatabaseManager(db_path)
+        excel_tools = create_excel_tools_for_chatbot(db_manager)
+        
+        # Simple pattern matching for tool calls
+        tool_pattern = r'(\w+)\((.*?)\)'
+        matches = re.findall(tool_pattern, response)
+        
+        results = []
+        
+        for tool_name, args_str in matches:
+            # Check if this is a valid Excel tool
+            if tool_name in excel_tools:
+                try:
+                    # Parse arguments
+                    if args_str.strip():
+                        try:
+                            args = ast.literal_eval(f"({args_str})")
+                            if not isinstance(args, tuple):
+                                args = (args,)
+                        except:
+                            # If parsing fails, pass as string
+                            args = (args_str.strip('"').strip("'"),)
+                    else:
+                        args = ()
+                    
+                    # Execute the tool
+                    result = excel_tools[tool_name]['function'](*args)
+                    results.append(f"\n**Tool Result from `{tool_name}`:**\n{result}")
+                    
+                except Exception as e:
+                    results.append(f"\n**Error executing `{tool_name}`:** {str(e)}")
+        
+        # Close the database manager after use
+        db_manager.close()
+        
+        return "\n".join(results) if results else ""
     
     def _handle_rag_query(self, question: str, additional_context: str = ""):
         """Handle a query to the RAG database(s) (runs in background thread).
@@ -6864,6 +7695,14 @@ ChatBot is not ready. Please check your configuration.
         
         # Check if RAG database is active
         has_active_database = hasattr(self, '_active_rag_kb') and self._active_rag_kb
+        
+        # Check if Excel database is active
+        has_excel_database = hasattr(self, '_active_excel_db') and self._active_excel_db
+        
+        # If Excel database is active, handle with Excel query tools
+        if has_excel_database:
+            self._handle_excel_query(message)
+            return
         
         # If local files are detected AND database is active, combine both
         if detected_files and has_active_database:

@@ -75,9 +75,10 @@ class PromptDisplay:
         return f"{sync_text}{prompt}"
 
 class ChatBot:
-    def __init__(self, agent_model=None, config_manager=None, plugin_manager=None):
+    def __init__(self, agent_model=None, config_manager=None, plugin_manager=None, is_cli=False):
         self.console = HistoryConsole()
         self.config_manager = config_manager
+        self.is_cli = is_cli  # Track if running in CLI mode
         self.modelname = self.config_manager.get_setting("chat_model_config.default_model", "gpt-4o")
         self.client = initialize_chat_client(
             endpoint=self.config_manager.get_setting("chat_model_config.default_endpoint"),
@@ -90,6 +91,11 @@ class ChatBot:
             sys.exit(1)
         self.plugin_manager = plugin_manager
         self.plugin_manager.load_plugins()
+        
+        # Register CLI-only commands before initializing CommandManager
+        if self.is_cli:
+            self._register_cli_only_commands()
+        
         self.command_manager = CommandManager(self, self.plugin_manager, self.console)
         self.console.add_command_completer(self.command_manager)
         self.cloud_sync_enabled = self.config_manager.get_setting('cloud_settings.conversation_sync_enabled', False)
@@ -362,6 +368,12 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
         self.console.print(Rule(style="bright_blue"))
         return response_text
 
+    def _register_cli_only_commands(self):
+        """Register commands that should only be available in CLI mode."""
+        # Manually register /context and /clear for CLI only
+        CommandManager.register_command('/context', 'Load more context from a file or list of files')(self.load_more_context)
+        CommandManager.register_command('/clear', 'Clear the conversation history')(self.clear_conversation)
+
     @CommandManager.register_command('/prompts')
     def display_prompts(self):
         """Display available prompts with their descriptions and arguments."""
@@ -372,9 +384,8 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
         """Display available slash commands with their descriptions."""
         self.command_manager.display_slash_commands()
 
-    @CommandManager.register_command('/clear')
     def clear_conversation(self):
-        """Clear the conversation history."""
+        """Clear the conversation history. (CLI only)"""
         self.context_manager.clear_conversation()
         self._conversation_id = None   # reset backend session
 
@@ -384,9 +395,8 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
         self.console.print("\n[bold red]Exiting...[/bold red]")
         sys.exit(0)
 
-    @CommandManager.register_command('/context')
     def load_more_context(self):
-        """Load more context from a file or list of files."""
+        """Load more context from a file or list of files. (CLI only)"""
         self.context_manager.load_more_context()
 
     @CommandManager.register_command('/help')

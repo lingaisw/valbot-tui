@@ -23,7 +23,6 @@ This TUI implementation includes all major features from the CLI version:
    - /help - Show comprehensive help
    - /model - Interactive model picker with arrow keys
    - /agent - Interactive agent selection with descriptions
-   - /context - Load files into conversation (supports globs)
    - /file - Display file contents with syntax highlighting
    - /terminal - Execute shell commands
    - /multi - Multi-line input via system editor
@@ -193,13 +192,7 @@ try:
 except ImportError:
     CHONKIE_AVAILABLE = False
 
-# Excel database imports
-try:
-    from excel_db_manager import ExcelDatabaseManager
-    from excel_db_tools import ExcelDatabaseTools, create_excel_tools_for_chatbot
-    EXCEL_DB_AVAILABLE = True
-except ImportError:
-    EXCEL_DB_AVAILABLE = False
+
 
 
 # Platform-specific emoji/symbol mapping
@@ -218,14 +211,16 @@ if IS_LINUX:
         'user': '❰❱',
         'cross': '✕',
         'gear': '⚙️',
+        'open_folder': '◧',
         'folder': '◨',
         'file': '◫',
         'keyboard': '⌨️ ',
         'lightning': '⚡',
         'agent': '◈',
         'chat' : '◷',
-        # 'link': '⎅ ◨ ☍ ⎘ ⚭ ⚯',
         'link': '⎘',
+        'send': '⌲',
+        'stop': '◼',
     }
 else:
     # Unicode emojis for Windows/Mac
@@ -238,6 +233,7 @@ else:
         'user': '👤',
         'cross': '❌',
         'gear': '⚙️',
+        'open_folder': '📂',
         'folder': '📁',
         'file': '📄',
         'keyboard': '⌨️',
@@ -245,6 +241,8 @@ else:
         'agent': '🤖',
         'chat': '💬',
         'link': '🔗',
+        'send': '⌲',
+        'stop': '◼',
     }
 
 
@@ -2140,9 +2138,42 @@ class ChatPanel(VerticalScroll):
             widget.remove()
 
 class CustomDirectoryTree(DirectoryTree):
-    """Custom DirectoryTree with custom file icon."""
+    """Custom DirectoryTree with custom file and folder icons."""
     
     ICON_FILE = f"{EMOJI['file']} "
+    ICON_FOLDER = f"{EMOJI['folder']} "
+    ICON_FOLDER_OPEN = f"{EMOJI['open_folder']} "
+    
+    def render_label(self, node: TreeNode[DirEntry], base_style: Style, style: Style) -> Text:
+        """Render tree label with custom folder and file icons."""
+        node_label = node._label.copy()
+        node_label.stylize(style)
+        
+        if node._allow_expand:
+            # Use custom folder icons based on expand state
+            icon = self.ICON_FOLDER_OPEN if node.is_expanded else self.ICON_FOLDER
+            prefix = (icon, base_style)
+            node_label.stylize_before(
+                self.get_component_rich_style("directory-tree--folder", partial=True),
+            )
+        else:
+            # Use custom file icon
+            prefix = (self.ICON_FILE, base_style)
+            node_label.stylize_before(
+                self.get_component_rich_style("directory-tree--file", partial=True),
+            )
+            node_label.highlight_regex(
+                r"\\..*$",
+                self.get_component_rich_style("directory-tree--extension", partial=True),
+            )
+        
+        if node._label.plain.startswith("."):
+            node_label.stylize_before(
+                self.get_component_rich_style("directory-tree--hidden", partial=True)
+            )
+        
+        text = Text.assemble(prefix, node_label)
+        return text
 
 
 class FileExplorerPanel(Container):
@@ -2325,12 +2356,13 @@ class FileExplorerPanel(Container):
             # Update the current path
             self.current_path = new_path
             
-            # Update address bar
-            try:
-                address_bar = self.query_one("#address-bar", Input)
-                address_bar.value = str(self.current_path)
-            except Exception:
-                pass
+            # Update address bar only if not actively typing in it
+            if not keep_focus_on_input:
+                try:
+                    address_bar = self.query_one("#address-bar", Input)
+                    address_bar.value = str(self.current_path)
+                except Exception:
+                    pass
             
             # Remove old directory tree and create new one
             try:
@@ -2619,19 +2651,35 @@ class StatusBar(Container):
         border: none !important;
     }
     
-    StatusBar #model-button {
+    StatusBar #right-buttons-container {
         dock: right;
+        layout: horizontal;
+        height: auto;
+        width: auto;
+    }
+    
+    StatusBar #model-button {
         min-width: 10;
         background: transparent !important;
         padding: 0 2;
-        margin: 0 0;
         content-align: center middle;
         text-style: none;
         border: none !important;
     }
+    
+    StatusBar #submit-button {
+        min-width: 5;
+        background: transparent !important;
+        padding: 0 2;
+        content-align: center middle;
+        text-style: none;
+        border: none !important;
+        margin-left: 1;
+    }
     """
     
     model_name = reactive("gpt-4o")
+    processing = reactive(False)
     
     def _truncate_model_name(self, model_name: str, max_length: int = 20) -> str:
         """Truncate model name if it exceeds max_length."""
@@ -2640,10 +2688,13 @@ class StatusBar(Container):
         return model_name[:max_length - 3] + "..."
     
     def compose(self) -> ComposeResult:
-        """Compose the status bar with files button (left) and model button (right)."""
+        """Compose the status bar with files button (left) and model/submit buttons in container (right)."""
         yield Button(EMOJI['link'], id="files-button")
-        display_name = self._truncate_model_name(self.model_name)
-        yield Button(f"{display_name} {EMOJI['gear']}", id="model-button")
+        with Horizontal(id="right-buttons-container"):
+            display_name = self._truncate_model_name(self.model_name)
+            yield Button(f"{display_name} {EMOJI['gear']}", id="model-button")
+            button_label = EMOJI['stop'] if self.processing else EMOJI['send']
+            yield Button(button_label, id="submit-button")
     
     def watch_model_name(self, new_model: str) -> None:
         """Update button label when model changes."""
@@ -2651,6 +2702,14 @@ class StatusBar(Container):
             button = self.query_one("#model-button", Button)
             display_name = self._truncate_model_name(new_model)
             button.label = f"{display_name} {EMOJI['gear']}"
+        except Exception:
+            pass
+    
+    def watch_processing(self, is_processing: bool) -> None:
+        """Update submit button label when processing state changes."""
+        try:
+            button = self.query_one("#submit-button", Button)
+            button.label = EMOJI['stop'] if is_processing else EMOJI['send']
         except Exception:
             pass
     
@@ -2669,6 +2728,23 @@ class StatusBar(Container):
         main_screen = self.screen
         if hasattr(main_screen, 'action_change_model'):
             await main_screen.action_change_model()
+    
+    @on(Button.Pressed, "#submit-button")
+    def submit_or_stop(self):
+        """Submit input when idle, or stop streaming when processing."""
+        main_screen = self.screen
+        
+        if self.processing:
+            # Stop streaming (same as Esc key behavior)
+            if hasattr(main_screen, 'action_cancel'):
+                main_screen.action_cancel()
+        else:
+            # Submit user input
+            try:
+                command_input = main_screen.query_one("#command-input", CommandInput)
+                command_input.submit()
+            except Exception:
+                pass
 
 class CommandInput(TextArea):
     """Modern Material Design multiline input widget with elegant styling."""
@@ -2706,22 +2782,23 @@ class CommandInput(TextArea):
         """Watch for text changes to trigger autocomplete."""
         new_text = self.text
         
-        # Only trigger command autocomplete if text starts with /
-        if new_text.startswith("/"):
+        # Check if current word at cursor starts with # - trigger file autocomplete
+        # This works for both regular input and commands (e.g., /create_database #chatbot)
+        # Check this FIRST and let it determine if file autocomplete should be shown
+        file_autocomplete_shown = False
+        if hasattr(self.screen, 'on_text_changed_check_paths'):
+            file_autocomplete_shown = self.screen.on_text_changed_check_paths(new_text, self.cursor_location)
+        
+        # Only trigger command autocomplete if text starts with / AND we're not showing file autocomplete
+        if new_text.startswith("/") and not file_autocomplete_shown:
             if new_text != self._last_text:
                 self._last_text = new_text
                 # Notify screen about text change
                 if hasattr(self.screen, 'on_command_input_changed'):
                     self.screen.on_command_input_changed(new_text)
         else:
-            # Not a command - update file path suggestions if already showing
-            if hasattr(self.screen, '_file_autocomplete_context') and self.screen._file_autocomplete_context:
-                # File autocomplete is active - update suggestions as user types
-                if hasattr(self.screen, 'on_text_changed_check_paths'):
-                    self.screen.on_text_changed_check_paths(new_text, self.cursor_location)
-            
-            # Hide command autocomplete if / was removed
-            if self._last_text.startswith("/"):
+            # Hide command autocomplete if / was removed (but not if file autocomplete is shown)
+            if self._last_text.startswith("/") and not file_autocomplete_shown:
                 if hasattr(self.screen, 'hide_autocomplete'):
                     self.screen.hide_autocomplete()
             
@@ -2795,26 +2872,16 @@ class CommandInput(TextArea):
         elif event.key == "tab":
             # Check if autocomplete is visible (command or file autocomplete)
             if autocomplete_visible and autocomplete:
+                # Tab selects the highlighted item (trigger Enter behavior)
                 option_list = autocomplete.get_option_list()
-                if option_list:
-                    option_list.focus()
-                    option_list.action_cursor_down()
+                if option_list and option_list.highlighted is not None:
+                    # Get the selected command/file and post the selection message
+                    selected_idx = option_list.highlighted
+                    if selected_idx < len(autocomplete._commands):
+                        command = autocomplete._commands[selected_idx][0]
+                        autocomplete.post_message(AutocompleteSelected(autocomplete, command))
                 event.prevent_default()
                 return
-            
-            # Try file path autocomplete only on Tab press
-            if hasattr(self.screen, 'try_file_path_autocomplete'):
-                # Get current word/path at cursor
-                cursor_pos = self.cursor_location
-                text = self.text
-                
-                # Don't autocomplete on whitespace
-                if cursor_pos[1] > 0 and text:
-                    char_before_cursor = text.split('\n')[cursor_pos[0]][max(0, cursor_pos[1] - 1):cursor_pos[1]]
-                    if not char_before_cursor.isspace():
-                        if self.screen.try_file_path_autocomplete(text, cursor_pos):
-                            event.prevent_default()
-                            return
             
             # Default: indent behavior (let TextArea handle it)
             # Don't prevent default - let the TextArea's tab_behavior work
@@ -3076,6 +3143,24 @@ class AutocompleteOverlay(Container):
             # Return focus to input
             if hasattr(self.screen, '_command_input'):
                 self.screen._command_input.focus()
+            event.prevent_default()
+            event.stop()
+        elif event.key == "tab":
+            # Tab selects the highlighted item
+            if self._option_list and self._option_list.highlighted is not None:
+                selected_idx = self._option_list.highlighted
+                if 0 <= selected_idx < len(self._commands):
+                    command = self._commands[selected_idx][0]
+                    self.post_message(AutocompleteSelected(self, command))
+            event.prevent_default()
+            event.stop()
+        elif event.key == "enter":
+            # Enter also selects the highlighted item
+            if self._option_list and self._option_list.highlighted is not None:
+                selected_idx = self._option_list.highlighted
+                if 0 <= selected_idx < len(self._commands):
+                    command = self._commands[selected_idx][0]
+                    self.post_message(AutocompleteSelected(self, command))
             event.prevent_default()
             event.stop()
         elif event.key == "up":
@@ -3940,15 +4025,14 @@ class MainScreen(Screen):
 Type `/help` for complete list of commands, or try these:
 
 - `/` - Show all commands
-- `/prompts` - Show custom prompts  
 - `/agent` - Run an agent workflow
 - `/model` - Change AI model
-- `/context` - Load files into context
+- `/create_database #<file_path>` - create RAG database from documents (.pdf, .docx, .csv, .py, etc.)
 - `/terminal <cmd>` - Run shell commands
 
 
 ### {EMOJI['info']} Tips
-- Reference local files directly in chat
+- Type `#` to reference local files directly in chat
 - Press `TAB` to autocomplete file paths
 - Use key-bindings for quick access. E.g.: `ctrl + a` for Agent
 - Change themes from palette
@@ -3984,7 +4068,8 @@ Try:
             self.chatbot = ChatBot(
                 agent_model=agent_model,
                 config_manager=self.config_manager,
-                plugin_manager=plugin_manager
+                plugin_manager=plugin_manager,
+                is_cli=False
             )
             
             # Add system prompt to conversation history (like CLI does)
@@ -4025,7 +4110,6 @@ Please check your configuration and try again.
             ("/new", "Start a new conversation"),
             ("/agent", "Select and run an agent workflow"),
             ("/model", "Change the AI model"),
-            ("/context", "Load files into conversation context"),
             ("/file", "Display file contents"),
             ("/terminal", "Execute shell commands"),
             ("/multi", "Multi-line input via system editor"),
@@ -4096,8 +4180,9 @@ Please check your configuration and try again.
             self.hide_autocomplete()
             return
         
-        # Clear file autocomplete context when showing commands
-        self._file_autocomplete_context = None
+        # Don't show command autocomplete if we're currently in file autocomplete mode
+        if hasattr(self, '_file_autocomplete_context') and self._file_autocomplete_context:
+            return
         
         # Filter commands based on input
         filtered_commands = self.filter_commands(text)
@@ -4109,20 +4194,39 @@ Please check your configuration and try again.
         # Show or update autocomplete overlay
         self.show_autocomplete(filtered_commands)
     
-    def on_text_changed_check_paths(self, text: str, cursor_pos: tuple) -> None:
-        """Check if current word is a partial path and show autocomplete."""
+    def on_text_changed_check_paths(self, text: str, cursor_pos: tuple) -> bool:
+        """Check if current word is a partial path and show autocomplete.
+        
+        Returns:
+            True if file autocomplete is shown, False otherwise
+        """
         if not text.strip():
             self.hide_autocomplete()
-            return
+            return False
         
-        # Get the word at cursor
+        # Get the word at cursor (returns empty string if not starting with #)
         word, start_col, end_col = self.get_word_at_cursor(text, cursor_pos)
         
-        if not word or len(word) < 1:  # Require at least 1 character
-            # Hide autocomplete if word is too short
+        # Check if the character at start_col is # (meaning we're in a file reference)
+        row, col = cursor_pos
+        lines = text.split('\n')
+        if row < len(lines):
+            line = lines[row]
+            # Check if we're at a # position
+            if start_col < len(line) and line[start_col] == '#':
+                # We're at a file reference position
+                # word contains the text after #, which could be empty (just #) or have content (#src)
+                pass  # Continue to show autocomplete
+            else:
+                # Not at a # position, hide autocomplete only if we had file autocomplete before
+                if hasattr(self, '_file_autocomplete_context') and self._file_autocomplete_context:
+                    self.hide_autocomplete()
+                return False
+        else:
+            # Invalid row position
             if hasattr(self, '_file_autocomplete_context') and self._file_autocomplete_context:
                 self.hide_autocomplete()
-            return
+            return False
         
         # Get matching file paths
         matches = self.get_file_path_matches(word)
@@ -4131,7 +4235,7 @@ Please check your configuration and try again.
             # Hide autocomplete if no matches
             if hasattr(self, '_file_autocomplete_context') and self._file_autocomplete_context:
                 self.hide_autocomplete()
-            return
+            return False
         
         # Format matches for display
         formatted_matches = []
@@ -4151,6 +4255,7 @@ Please check your configuration and try again.
         
         # Show autocomplete with file paths
         self.show_autocomplete(formatted_matches)
+        return True
     
     def show_autocomplete(self, commands: list) -> None:
         """Show autocomplete overlay with filtered commands."""
@@ -4173,6 +4278,7 @@ Please check your configuration and try again.
     def get_word_at_cursor(self, text: str, cursor_pos: tuple) -> tuple:
         """
         Get the word/path at cursor position.
+        For file path autocomplete, only returns words that start with #.
         
         Returns:
             (word, start_col, end_col) tuple
@@ -4198,11 +4304,20 @@ Please check your configuration and try again.
             end += 1
         
         word = line[start:end]
-        return (word, start, end)
+        
+        # Only return the word if it starts with # (for file path autocomplete)
+        # Strip the # from the returned word, but remember the position includes it
+        if word.startswith('#'):
+            # Return word without the # prefix, but keep start position at the #
+            return (word[1:], start, end)
+        
+        # If word doesn't start with #, return empty (no autocomplete)
+        return ("", start, end)
     
     def get_file_path_matches(self, partial_path: str, max_results: int = 20) -> list:
         """
         Get file/folder paths that match the partial path.
+        If partial_path is empty, returns all files/folders in current directory.
         
         Returns:
             List of (display_name, full_path, is_dir) tuples
@@ -4210,22 +4325,20 @@ Please check your configuration and try again.
         import os
         from pathlib import Path
         
-        if not partial_path:
-            return []
-        
-        # Expand user home directory
-        partial_path = os.path.expanduser(partial_path)
+        # Expand user home directory if provided
+        if partial_path:
+            partial_path = os.path.expanduser(partial_path)
         
         # Handle both absolute and relative paths
-        if os.path.isabs(partial_path):
+        if partial_path and os.path.isabs(partial_path):
             base_path = os.path.dirname(partial_path)
             prefix = os.path.basename(partial_path)
         else:
-            # Relative path - search from current working directory
+            # Relative path or empty - search from current working directory
             base_path = os.getcwd()
-            if os.path.dirname(partial_path):
+            if partial_path and os.path.dirname(partial_path):
                 base_path = os.path.join(base_path, os.path.dirname(partial_path))
-            prefix = os.path.basename(partial_path)
+            prefix = os.path.basename(partial_path) if partial_path else ""
         
         matches = []
         
@@ -4271,6 +4384,7 @@ Please check your configuration and try again.
     def try_file_path_autocomplete(self, text: str, cursor_pos: tuple) -> bool:
         """
         Try to show file path autocomplete or trigger if already showing.
+        Only works if the word at cursor starts with #.
         
         Returns:
             True if autocomplete was shown/triggered, False otherwise
@@ -4284,9 +4398,10 @@ Please check your configuration and try again.
                     option_list.focus()
                 return True
         
-        # Get the word at cursor
+        # Get the word at cursor (only returns non-empty if starts with #)
         word, start_col, end_col = self.get_word_at_cursor(text, cursor_pos)
         
+        # If word is empty, it means it doesn't start with # - no autocomplete
         if not word:
             return False
         
@@ -4313,13 +4428,14 @@ Please check your configuration and try again.
                 else:
                     completion = completion + " "
                 
-                # Replace the word with the completion
-                new_line = line[:start_col] + completion + line[end_col:]
+                # Replace the word with the completion, preserving the # prefix
+                # start_col points to the # character, so we keep it
+                new_line = line[:start_col] + "#" + completion + line[end_col:]
                 lines[row] = new_line
                 command_input.text = '\n'.join(lines)
                 
-                # Move cursor to end of completed word
-                new_cursor_col = start_col + len(completion)
+                # Move cursor to end of completed word (+ 1 for the # we added)
+                new_cursor_col = start_col + len(completion) + 1
                 command_input.move_cursor((row, new_cursor_col))
             
             return True
@@ -4366,13 +4482,14 @@ Please check your configuration and try again.
             
             if row < len(lines):
                 line = lines[row]
-                # Replace the word with the selected path
-                new_line = line[:context['start_col']] + actual_completion + line[context['end_col']:]
+                # Replace the word with the selected path, preserving the # prefix
+                # start_col points to the # character, so we keep it
+                new_line = line[:context['start_col']] + "#" + actual_completion + line[context['end_col']:]
                 lines[row] = new_line
                 command_input.text = '\n'.join(lines)
                 
-                # Move cursor to end of completed path
-                new_cursor_col = context['start_col'] + len(actual_completion)
+                # Move cursor to end of completed path (+ 1 for the # we added)
+                new_cursor_col = context['start_col'] + len(actual_completion) + 1
                 command_input.move_cursor((row, new_cursor_col))
             
             # Always close the autocomplete and clear context after selection
@@ -4610,45 +4727,91 @@ Please check your configuration and try again.
                 # Remove the leading '/' since it's not actually a command
                 message_without_slash = message.lstrip('/').strip()
                 
+                # Strip # from file references for the actual message to send
+                message_to_send = self._strip_file_markers(message_without_slash)
+                
+                # Format file references for display (#file -> `file`)
+                message_for_display = self._format_file_references(message_without_slash)
+                
                 # For multiline messages, we need to format them properly for Markdown
                 # Convert single newlines to double newlines for proper Markdown line breaks
-                formatted_message = message_without_slash.replace('\n', '\n\n')
+                formatted_message = message_for_display.replace('\n', '\n\n')
                 
                 # Display user message immediately (without the /)
                 chat_panel = self.query_one("#chat-panel", ChatPanel)
                 chat_panel.add_message("user", formatted_message)
                 
-                # Autosave user message in the background
-                asyncio.create_task(self._autosave_message("user", message_without_slash))
+                # Autosave user message in the background (without # markers)
+                asyncio.create_task(self._autosave_message("user", message_to_send))
                 
-                # Send the message without slash to the chatbot (without double newlines) in background thread
+                # Send the message without slash to the chatbot (without double newlines or # markers) in background thread
                 import threading
                 thread = threading.Thread(
                     target=self._send_chat_message_in_thread,
-                    args=(message_without_slash,),
+                    args=(message_to_send,),
                     daemon=True
                 )
                 thread.start()
         else:
+            # Strip # from file references for the actual message to send
+            message_to_send = self._strip_file_markers(message)
+            
+            # Format file references for display (#file -> `file`)
+            message_for_display = self._format_file_references(message)
+            
             # For multiline messages, we need to format them properly for Markdown
             # Convert single newlines to double newlines for proper Markdown line breaks
-            formatted_message = message.replace('\n', '\n\n')
+            formatted_message = message_for_display.replace('\n', '\n\n')
             
             # Display user message immediately
             chat_panel = self.query_one("#chat-panel", ChatPanel)
             chat_panel.add_message("user", formatted_message)
             
-            # Autosave user message in the background
-            asyncio.create_task(self._autosave_message("user", message))
+            # Autosave user message in the background (without # markers)
+            asyncio.create_task(self._autosave_message("user", message_to_send))
             
-            # Send the original message to the chatbot (without double newlines) in background thread
+            # Send the original message to the chatbot (without double newlines or # markers) in background thread
             import threading
             thread = threading.Thread(
                 target=self._send_chat_message_in_thread,
-                args=(message,),
+                args=(message_to_send,),
                 daemon=True
             )
             thread.start()
+    
+    def _strip_file_markers(self, command: str) -> str:
+        """Strip # markers from file paths in commands.
+        
+        The # prefix is used in the TUI for file autocomplete suggestions,
+        but needs to be removed before processing actual file paths.
+        
+        Args:
+            command: The command string that may contain #file paths
+            
+        Returns:
+            Command string with # markers removed from file paths
+        """
+        import re
+        # Replace #filepath patterns with filepath (preserving spaces)
+        # Match # followed by non-whitespace characters (file path)
+        return re.sub(r'#([^\s]+)', r'\1', command)
+    
+    def _format_file_references(self, message: str) -> str:
+        """Format file references in chat messages.
+        
+        Strips # markers and adds backtick highlighting for file references.
+        Example: "Check #config.py and #src/main.py" -> "Check `config.py` and `src/main.py`"
+        
+        Args:
+            message: The chat message that may contain #file references
+            
+        Returns:
+            Formatted message with file references highlighted
+        """
+        import re
+        # Replace #filepath patterns with `filepath` (backtick highlighting)
+        # Match # followed by non-whitespace characters (file path)
+        return re.sub(r'#([^\s]+)', r'`\1`', message)
     
     async def handle_command(self, command: str) -> bool:
         """Handle slash commands using CommandManager.
@@ -4657,6 +4820,9 @@ Please check your configuration and try again.
             bool: True if command was handled, False if command is not recognized
         """
         chat_panel = self.query_one("#chat-panel", ChatPanel)
+        
+        # Strip # markers from file paths before processing
+        command = self._strip_file_markers(command)
         
         parts = command.split(maxsplit=1)
         cmd = parts[0].lower()
@@ -4787,16 +4953,6 @@ Restarting TUI to reload configuration...
             if hasattr(self, '_active_rag_kb') and self._active_rag_kb is not None:
                 self._active_rag_kb = None
             
-            # Unload any active Excel databases
-            if hasattr(self, '_active_excel_db') and self._active_excel_db is not None:
-                # Close all database connections
-                for db_path, db_info in self._active_excel_db.items():
-                    try:
-                        db_info['manager'].close()
-                    except:
-                        pass
-                self._active_excel_db = None
-            
             # Clear context chip bar
             try:
                 context_chip_bar = self.query_one("#context-chip-bar", ContextChipBar)
@@ -4833,15 +4989,12 @@ Restarting TUI to reload configuration...
 **Available Commands:**
 - `/agent` - Select and run an agent workflow
 - `/model` - Change the AI model
-- `/context <files>` - Load files into conversation context  
 - `/new` - Start a new conversation
 - `/prompts` - Show available custom prompts
 - `/commands` - Show all available commands
 - `/settings` - Show settings (CLI mode only)
-- `/create_database <folder> <files>` - Create a RAG database (PDF, DOCX, TXT, MD, etc.)
-- `/load_database <folder1> [folder2] ...` - Load RAG database(s)
-- `/create_excel_db <db_name> <files>` - Create Excel database (XLSX, XLS)
-- `/load_excel_db <db_path>` - Load Excel database for querying
+- `/create_database <folder_path> #<file1> #<file1>` - Create a RAG database (PDF, DOCX, TXT, MD, etc.)
+- `/load_database <folder_path>` - Load RAG database(s)
 - `/quit` - Exit the application
 
 **Usage Tips:**
@@ -4850,7 +5003,6 @@ Restarting TUI to reload configuration...
 - Agent workflows provide specialized functionality
 - Context files are remembered throughout conversation
 - **RAG databases** enable Q&A with your documents
-- **Excel databases** enable efficient querying of large Excel files
 - Load multiple databases with space-separated paths
 - Click ✕ on database chips to unload specific databases
 - Use `/new` to unload all databases and start fresh
@@ -4918,10 +5070,6 @@ Error executing command `{cmd}`:
   - Available models: gpt-4o, gpt-5, gpt-4.1, gpt-oss:20b
   
 ### Context & File Management
-- `/context <file_or_pattern>` - Load file(s) into conversation context
-  - Example: `/context file.py` - Load single file
-  - Example: `/context *.py` - Load all Python files
-  - Example: `/context src/**/*.js` - Load all JS files in src/
 - `/file <path>` - Display file content with syntax highlighting
   - Example: `/file ./config.py`
 
@@ -4931,7 +5079,7 @@ Error executing command `{cmd}`:
   - Supports: PDF, DOCX, XLSX, XLS, TXT, MD, PDL, PY, C, CPP, H files
   - Also supports .gz compressed files (.pdf.gz, .txt.gz, .log.gz, etc.)
   - Creates vector embeddings for semantic search
-- `/load_database <folder1> [folder2] ...` - Load one or more databases
+- `/load_database <folder_path>` - Load one or more databases
   - Example: `/load_database ./kb` - Load single database
   - Example: `/load_database ./kb1 ./kb2 ./kb3` - Load multiple databases
   - After loading, just ask questions normally in chat!
@@ -5083,11 +5231,6 @@ Edit `user_config.json` to customize your experience:
 - Only works with gpt-5 models
 - Restart TUI after config changes
 
-**Q: File not loading with /context?**
-- Check path is correct (use absolute paths if needed)
-- Ensure you have read permissions
-- Try with `/file` first to verify path
-
 **Q: Agent not found?**
 - Use `/agent` to see available agents
 - Some agents may need to be installed
@@ -5141,7 +5284,7 @@ Need more help? Just ask ValBot directly!
                         if file_size > max_size_bytes:
                             chat_panel.add_message("error", 
                                 f"{EMOJI['cross']} File too large to display: {file_size / (1024*1024):.2f} MB (limit: 10 MB)\n"
-                                f"Use `/context` to load it into conversation context instead.")
+                                f"Reference the file directly in your message instead.")
                         else:
                             # Read in chunks for better memory handling
                             content_chunks = []
@@ -5181,55 +5324,6 @@ Need more help? Just ask ValBot directly!
                     chat_panel.add_message("error", f"{EMOJI['cross']} Error reading file: {str(e)}")
             else:
                 chat_panel.add_message("system", "**Usage**: `/file <path>`\n\nExample: `/file ./config.py`")
-            return True
-        
-        elif cmd == "/context":
-            # Display the user's command input in the chat with backtick formatting
-            chat_panel.add_message("user", f"`{command}`")
-            # Load file(s) into conversation context
-            if args and self.chatbot:
-                try:
-                    # Use context manager to load context
-                    import glob
-                    files = []
-                    # Support glob patterns
-                    for pattern in args.split():
-                        expanded = glob.glob(pattern)
-                        if expanded:
-                            files.extend(expanded)
-                        elif os.path.exists(pattern):
-                            files.append(pattern)
-                    
-                    if files:
-                        self.chatbot.context_manager.load_context(files)
-                        
-                        # Add files to chip bar
-                        for file_path in files:
-                            self._context_chip_bar.add_file(file_path)
-                        
-                        file_list = "\n".join(f"- `{f}`" for f in files)
-                        chat_panel.add_message("system", f"""### 📂 Context Loaded
-
-Loaded {len(files)} file(s) into conversation context:
-
-{file_list}
-
-You can now ask questions about these files!
-""")
-                    else:
-                        chat_panel.add_message("error", f"{EMOJI['cross']} No files found matching: `{args}`")
-                except Exception as e:
-                    chat_panel.add_message("error", f"{EMOJI['cross']} Error loading context: {str(e)}")
-            else:
-                chat_panel.add_message("system", """### 📂 Load Context
-
-**Usage**: `/context <file_or_pattern>`
-
-**Examples**:
-- `/context main.py` - Load single file
-- `/context *.py` - Load all Python files
-- `/context src/**/*.js` - Load all JS files in src/
-""")
             return True
         
         elif cmd == "/multi":
@@ -5290,12 +5384,6 @@ Default: vim (Linux/Mac) or notepad (Windows)
 **Supported file types**: PDF, DOCX, TXT, MD, PDL, PY, C, CPP, H
 **Compressed files**: All formats also support .gz compression (e.g., .pdf.gz, .txt.gz, .log.gz)
 
-**For Excel files (XLSX, XLS)**: Use the specialized Excel database instead:
-- `/create_excel_db <db_name> <file1.xlsx> [file2.xlsx] ...`
-- `/load_excel_db <db_name.db>`
-
-Excel databases are optimized for querying spreadsheet data without token limits!
-
 This will process your documents and create a searchable database with vector embeddings.
 The cache and database files will be stored in the output folder.
 **Note**: Source files are NOT copied - only the database cache is created.
@@ -5306,72 +5394,6 @@ The cache and database files will be stored in the output folder.
                 thread = threading.Thread(
                     target=self._run_create_database_in_thread,
                     args=(args,),
-                    daemon=True
-                )
-                thread.start()
-            return True
-        
-        elif cmd == "/create_excel_db":
-            # Display the user's command input in the chat with backtick formatting
-            chat_panel.add_message("user", f"`{command}`")
-            # Create a new Excel database (SQLite-based for efficient querying)
-            if not args:
-                chat_panel.add_message("system", """### 📊 Create Excel Database
-
-**Usage**: `/create_excel_db <db_name> <file1.xlsx> [file2.xlsx] ...`
-
-**Example**:
-- `/create_excel_db my_excel_db data1.xlsx data2.xlsx`
-- `/create_excel_db C:/databases/reports *.xlsx`
-
-**Supported file types**: XLSX, XLS
-
-This will:
-1. Create a SQLite database with metadata about your Excel files
-2. Index all sheets, columns, row counts, and sample data
-3. Enable efficient querying without loading entire files into memory
-
-After creating, use `/load_excel_db` to query the data!
-""")
-            else:
-                # Run in background thread
-                import threading
-                thread = threading.Thread(
-                    target=self._run_create_excel_db_in_thread,
-                    args=(args,),
-                    daemon=True
-                )
-                thread.start()
-            return True
-        
-        elif cmd == "/load_excel_db":
-            # Display the user's command input in the chat with backtick formatting
-            chat_panel.add_message("user", f"`{command}`")
-            # Load an existing Excel database
-            if not args:
-                chat_panel.add_message("system", """### 📊 Load Excel Database
-
-**Usage**: `/load_excel_db <db_path>`
-
-**Example**:
-- `/load_excel_db my_excel_db.db`
-- `/load_excel_db C:/databases/reports.db`
-
-This will load the database and make Excel data queryable.
-After loading, you can ask natural questions like:
-- "What sheets are in the database?"
-- "Show me the columns in the Sales sheet"
-- "Find all rows where Status is 'FAIL'"
-- "What's the data in the first 5 rows of Test Results?"
-
-The AI will automatically use the appropriate tools to answer!
-""")
-            else:
-                # Run in background thread
-                import threading
-                thread = threading.Thread(
-                    target=self._run_load_excel_db_in_thread,
-                    args=(args.strip(),),
                     daemon=True
                 )
                 thread.start()
@@ -6564,6 +6586,9 @@ You can manually edit your configuration file at:
         chat_panel = self.query_one("#chat-panel", ChatPanel)
         
         try:
+            # Strip # markers from file paths (used for autocomplete)
+            args = self._strip_file_markers(args)
+            
             # Parse arguments: first is output folder, rest are file paths
             parts = args.split()
             if len(parts) < 2:
@@ -7039,461 +7064,6 @@ To unload all databases and return to normal chat, use `/new`.
 {traceback.format_exc()}"""
             self.app.call_from_thread(chat_panel.add_message, "error", error_msg)
     
-    def _run_create_excel_db_in_thread(self, args: str):
-        """Create a new Excel database (SQLite-based) for efficient querying."""
-        chat_panel = self.query_one("#chat-panel", ChatPanel)
-        
-        try:
-            # Check if Excel DB is available
-            if not EXCEL_DB_AVAILABLE:
-                self.app.call_from_thread(
-                    chat_panel.add_message,
-                    "error",
-                    f"""{EMOJI['cross']} Excel database modules not found.
-
-Make sure `excel_db_manager.py` and `excel_db_tools.py` exist in the project directory."""
-                )
-                return
-            
-            # Check pandas dependency
-            if pd is None:
-                self.app.call_from_thread(
-                    chat_panel.add_message,
-                    "error",
-                    f"""{EMOJI['cross']} Missing dependency: pandas
-
-Install with:
-```bash
-pip install pandas openpyxl
-```"""
-                )
-                return
-            
-            # Parse arguments: first is database name, rest are Excel files
-            parts = args.split()
-            if len(parts) < 2:
-                self.app.call_from_thread(
-                    chat_panel.add_message,
-                    "error",
-                    f"{EMOJI['cross']} Invalid arguments. Usage: `/create_excel_db <db_name> <file1.xlsx> [file2.xlsx] ...`"
-                )
-                return
-            
-            db_name = parts[0]
-            if not db_name.endswith('.db'):
-                db_name += '.db'
-            
-            file_patterns = parts[1:]
-            
-            # Show initial message
-            self.app.call_from_thread(
-                chat_panel.add_message,
-                "system",
-                f"""### {EMOJI['lightbulb']} Creating Excel Database
-
-**Database**: `{db_name}`
-**Input files**: {len(file_patterns)} pattern(s)
-
-Processing Excel files..."""
-            )
-            
-            # Expand file patterns (glob support)
-            import glob
-            excel_files = []
-            for pattern in file_patterns:
-                expanded = glob.glob(pattern)
-                if expanded:
-                    excel_files.extend(expanded)
-                elif os.path.exists(pattern):
-                    excel_files.append(pattern)
-            
-            if not excel_files:
-                self.app.call_from_thread(
-                    chat_panel.add_message,
-                    "error",
-                    f"{EMOJI['cross']} No Excel files found matching the patterns."
-                )
-                return
-            
-            self.app.call_from_thread(
-                chat_panel.add_message,
-                "system",
-                f"Found {len(excel_files)} Excel file(s) to index..."
-            )
-            
-            # Create database manager
-            db_manager = ExcelDatabaseManager(db_name)
-            
-            # Index each file
-            indexed_count = 0
-            failed_count = 0
-            
-            for excel_file in excel_files:
-                self.app.call_from_thread(
-                    chat_panel.add_message,
-                    "system",
-                    f"Indexing: `{Path(excel_file).name}`..."
-                )
-                
-                success = db_manager.index_excel_file(excel_file, sample_rows=10)
-                
-                if success:
-                    indexed_count += 1
-                    self.app.call_from_thread(
-                        chat_panel.add_message,
-                        "system",
-                        f"{EMOJI['checkmark']} Indexed: `{Path(excel_file).name}`"
-                    )
-                else:
-                    failed_count += 1
-                    self.app.call_from_thread(
-                        chat_panel.add_message,
-                        "error",
-                        f"{EMOJI['cross']} Failed: `{Path(excel_file).name}`"
-                    )
-            
-            db_manager.close()
-            
-            # Display summary
-            summary = f"""### {EMOJI['checkmark']} Excel Database Created
-
-**Summary**:
-- Files indexed: {indexed_count}
-- Files failed: {failed_count}
-- Database: `{db_name}`
-
-You can now load this database with:
-```
-/load_excel_db {db_name}
-```
-
-Then ask questions about your Excel data naturally!
-"""
-            
-            self.app.call_from_thread(chat_panel.add_message, "system", summary)
-            
-        except Exception as e:
-            error_msg = f"""### {EMOJI['cross']} Error Creating Excel Database
-
-```
-{str(e)}
-```
-
-{traceback.format_exc()}"""
-            self.app.call_from_thread(chat_panel.add_message, "error", error_msg)
-    
-    def _run_load_excel_db_in_thread(self, db_path: str):
-        """Load an existing Excel database and enable querying."""
-        chat_panel = self.query_one("#chat-panel", ChatPanel)
-        
-        try:
-            # Check if Excel DB is available
-            if not EXCEL_DB_AVAILABLE:
-                self.app.call_from_thread(
-                    chat_panel.add_message,
-                    "error",
-                    f"""{EMOJI['cross']} Excel database modules not found.
-
-Make sure `excel_db_manager.py` and `excel_db_tools.py` exist in the project directory."""
-                )
-                return
-            
-            # Show initial message
-            self.app.call_from_thread(
-                chat_panel.add_message,
-                "system",
-                f"""### {EMOJI['lightbulb']} Loading Excel Database
-
-Loading database from: `{db_path}`
-
-Please wait..."""
-            )
-            
-            # Check if database exists
-            if not os.path.exists(db_path):
-                self.app.call_from_thread(
-                    chat_panel.add_message,
-                    "error",
-                    f"{EMOJI['cross']} Database not found: `{db_path}`"
-                )
-                return
-            
-            # Initialize database manager
-            db_manager = ExcelDatabaseManager(db_path)
-            
-            # Get database stats
-            files = db_manager.list_files()
-            sheets = db_manager.list_sheets()
-            
-            if not files:
-                self.app.call_from_thread(
-                    chat_panel.add_message,
-                    "error",
-                    f"{EMOJI['cross']} Database is empty. No files indexed."
-                )
-                db_manager.close()
-                return
-            
-            # Close the database manager - we'll create new connections per query
-            db_manager.close()
-            
-            # Store database path (not the manager) to avoid SQLite threading issues
-            if not hasattr(self, '_active_excel_db'):
-                self._active_excel_db = {}
-            
-            self._active_excel_db[db_path] = {
-                'db_path': db_path,  # Store path instead of manager
-                'files': files,
-                'sheets': sheets
-            }
-            
-            # Add to chip bar
-            self.app.call_from_thread(self._context_chip_bar.add_database, f"Excel: {Path(db_path).name}")
-            
-            # Display summary
-            file_list = "\n".join([f"- `{Path(f['file_path']).name}`" for f in files[:10]])
-            if len(files) > 10:
-                file_list += f"\n- ... and {len(files) - 10} more"
-            
-            summary = f"""### {EMOJI['checkmark']} Excel Database Loaded
-
-**Summary**:
-- Files indexed: {len(files)}
-- Total sheets: {len(sheets)}
-- Database: `{db_path}`
-
-**Indexed files**:
-{file_list}
-
-**You can now ask questions about your Excel data!**
-
-Example questions:
-- "What sheets are available?"
-- "Show me the columns in the [sheet name] sheet"
-- "Get sample data from [sheet name]"
-- "Find all rows where [column] equals [value]"
-- "Search for [term] in the data"
-
-The AI will automatically use the appropriate tools to query your data!
-
-To unload this database, click the ✕ on its chip above or use `/new`.
-"""
-            
-            self.app.call_from_thread(chat_panel.add_message, "system", summary)
-            
-        except Exception as e:
-            error_msg = f"""### {EMOJI['cross']} Error Loading Excel Database
-
-```
-{str(e)}
-```
-
-{traceback.format_exc()}"""
-            self.app.call_from_thread(chat_panel.add_message, "error", error_msg)
-    
-    def _handle_excel_query(self, question: str):
-        """Handle a query to Excel database(s) using AI tools (runs in background thread)."""
-        chat_panel = self.query_one("#chat-panel", ChatPanel)
-        
-        try:
-            # Set processing state
-            self.app.call_from_thread(self._set_processing_state, True)
-            self.app.call_from_thread(self._add_loading_message)
-            
-            # Get database path
-            if not hasattr(self, '_active_excel_db') or not self._active_excel_db:
-                raise Exception("No Excel database loaded")
-            
-            db_path = list(self._active_excel_db.keys())[0]
-            
-            # Create database manager to get context
-            db_manager = ExcelDatabaseManager(db_path)
-            
-            # Get all available sheets with their structure
-            sheets_info = db_manager.list_sheets()
-            sheets_context = "**Available Sheets:**\n"
-            for sheet in sheets_info:
-                sheets_context += f"\n- **{sheet['sheet_name']}**: {sheet['row_count']} rows × {sheet['column_count']} columns"
-                # Get column info for this sheet
-                sheet_detail = db_manager.describe_sheet(sheet['sheet_name'])
-                if sheet_detail and 'columns' in sheet_detail:
-                    cols = [col['name'] for col in sheet_detail['columns'][:10]]  # First 10 columns
-                    sheets_context += f"\n  Columns: {', '.join(cols)}"
-                    if len(sheet_detail['columns']) > 10:
-                        sheets_context += f" ... (+{len(sheet_detail['columns']) - 10} more)"
-            
-            db_manager.close()
-            
-            # Build enhanced context for the AI
-            tools_context = f"""
-**Excel Database Information:**
-
-{sheets_context}
-
-**How to answer questions:**
-
-1. For questions about "what [items] are in [sheet]" or "what [items] are listed":
-   - First, look at sample data: get_sample_rows("[sheet_name]", limit=50)
-   - Identify which column contains the items (look for column names like "Test_Name", "Product", etc.)
-   - List the unique values you see in that column from the sample
-   - Note: Sample data shows the first rows, which gives you a good overview
-
-2. For questions about specific criteria (e.g., "failed tests", "errors"):
-   - Use search_values("[keyword]", sheet_name="[sheet]") to find matching rows
-   - Or describe_sheet() to understand the structure first
-
-3. For counting or statistics:
-   - get_column_stats() provides summary statistics
-   - query_sheet() can filter and count specific matches
-
-**Your Task:**
-User question: "{question}"
-
-**Action Plan:**
-1. Identify the relevant sheet name from the available sheets above
-2. Call get_sample_rows() with a higher limit (20-50) to see actual data
-3. Analyze the sample data to identify which column contains the answer
-4. Extract and present the relevant information from that column
-
-**Available Tools (call them in your response):**
-- get_sample_rows("sheet_name", limit=50)
-- describe_sheet("sheet_name")
-- search_values("search_term", sheet_name="sheet_name")
-- query_sheet("sheet_name", columns=["col1", "col2"])
-"""
-            
-            # Send message to chatbot with tools context
-            augmented_message = f"{tools_context}\n\nPlease answer the user's question using the available tools."
-            
-            # Add to conversation history
-            self.chatbot.context_manager.conversation_history.append({
-                "role": "user",
-                "content": augmented_message
-            })
-            
-            # Get response from chatbot using streaming API
-            self.app.call_from_thread(self._remove_loading_message)
-            
-            # Prepare streaming request
-            model_name = self.chatbot.modelname
-            messages = self.chatbot.context_manager.conversation_history
-            effort_level = self.config_manager.get_setting("chat_model_config.reasoning_effort", "low")
-            
-            kwargs = {
-                "model": model_name,
-                "input": messages,
-                "stream": True,
-            }
-            
-            if model_name.startswith("gpt-5"):
-                kwargs["reasoning"] = {"summary": "auto", "effort": effort_level}
-            
-            # Stream the response
-            stream = self.chatbot.client.responses.create(**kwargs)
-            
-            full_response = ""
-            first_response_received = False
-            
-            for event in stream:
-                if self._cancel_streaming:
-                    break
-                
-                if isinstance(event, ResponseTextDeltaEvent):
-                    if event.delta:
-                        # Remove loading on first response
-                        if not first_response_received:
-                            first_response_received = True
-                        
-                        full_response += event.delta
-                        
-                        # Update streaming message content
-                        self.app.call_from_thread(self._update_streaming_response, full_response)
-            
-            # Parse and execute any tool calls in the response
-            tool_results = self._execute_excel_tools_from_response(full_response)
-            
-            # If tools were executed, append results to the response
-            if tool_results:
-                full_response += "\n\n" + tool_results
-                self.app.call_from_thread(self._update_streaming_response, full_response)
-            
-            # Finalize the streaming response
-            self.app.call_from_thread(self._finalize_streaming_response)
-            
-            # Add to conversation history
-            self.chatbot.context_manager.conversation_history.append({
-                "role": "assistant",
-                "content": full_response
-            })
-            
-            # Autosave - schedule on main thread
-            def do_autosave():
-                asyncio.create_task(self._autosave_message("assistant", full_response))
-            
-            self.app.call_from_thread(do_autosave)
-            
-        except Exception as e:
-            self.app.call_from_thread(self._remove_loading_message)
-            error_msg = f"""### {EMOJI['cross']} Error Querying Excel Database
-
-```
-{str(e)}
-```
-
-{traceback.format_exc()}"""
-            self.app.call_from_thread(chat_panel.add_message, "error", error_msg)
-        finally:
-            self.app.call_from_thread(self._set_processing_state, False)
-    
-    def _execute_excel_tools_from_response(self, response: str) -> str:
-        """Parse AI response and execute any Excel tool calls."""
-        if not hasattr(self, '_active_excel_db') or not self._active_excel_db:
-            return ""
-        
-        import re
-        import ast
-        
-        # Get the first database path (for now, support single database)
-        db_path = list(self._active_excel_db.keys())[0]
-        
-        # Create a NEW database manager in this thread to avoid SQLite threading issues
-        db_manager = ExcelDatabaseManager(db_path)
-        excel_tools = create_excel_tools_for_chatbot(db_manager)
-        
-        # Simple pattern matching for tool calls
-        tool_pattern = r'(\w+)\((.*?)\)'
-        matches = re.findall(tool_pattern, response)
-        
-        results = []
-        
-        for tool_name, args_str in matches:
-            # Check if this is a valid Excel tool
-            if tool_name in excel_tools:
-                try:
-                    # Parse arguments
-                    if args_str.strip():
-                        try:
-                            args = ast.literal_eval(f"({args_str})")
-                            if not isinstance(args, tuple):
-                                args = (args,)
-                        except:
-                            # If parsing fails, pass as string
-                            args = (args_str.strip('"').strip("'"),)
-                    else:
-                        args = ()
-                    
-                    # Execute the tool
-                    result = excel_tools[tool_name]['function'](*args)
-                    results.append(f"\n**Tool Result from `{tool_name}`:**\n{result}")
-                    
-                except Exception as e:
-                    results.append(f"\n**Error executing `{tool_name}`:** {str(e)}")
-        
-        # Close the database manager after use
-        db_manager.close()
-        
-        return "\n".join(results) if results else ""
-    
     def _handle_rag_query(self, question: str, additional_context: str = ""):
         """Handle a query to the RAG database(s) (runs in background thread).
         
@@ -7655,7 +7225,7 @@ Cite sources when possible."""
         
         File Handling:
         - When files are referenced in chat, they are detected and loaded into
-          context_manager using context_management.py (same as /context command)
+          context_manager using context_management.py
         - Files are read with chonkie chunking and proper formatting
         - File content persists in conversation history for follow-up questions
         - No separate tool-based file reading to avoid confusion
@@ -7696,14 +7266,6 @@ ChatBot is not ready. Please check your configuration.
         
         # Check if RAG database is active
         has_active_database = hasattr(self, '_active_rag_kb') and self._active_rag_kb
-        
-        # Check if Excel database is active
-        has_excel_database = hasattr(self, '_active_excel_db') and self._active_excel_db
-        
-        # If Excel database is active, handle with Excel query tools
-        if has_excel_database:
-            self._handle_excel_query(message)
-            return
         
         # If local files are detected AND database is active, combine both
         if detected_files and has_active_database:
@@ -7751,7 +7313,12 @@ An error occurred while processing your message:
     def _set_processing_state(self, processing: bool):
         """Set processing state (called from worker thread)."""
         self.processing = processing
-        # Status bar now only shows model, no processing state
+        # Update status bar button
+        try:
+            status_bar = self.query_one("#status-bar", StatusBar)
+            status_bar.processing = processing
+        except Exception:
+            pass
     
     def _add_loading_message(self):
         """Add loading message (called from worker thread)."""
@@ -8332,7 +7899,7 @@ Falling back to standard chat...
             self._load_chat_history(event.path)
             return
         
-        # Otherwise, it's from the file explorer - add file to chat
+        # Otherwise, it's from the file explorer - add file to chat with # prefix
         file_path = event.path
         try:
             # Convert to relative path from current directory
@@ -8342,16 +7909,16 @@ Falling back to standard chat...
             # Get the command input widget
             command_input = self.query_one("#command-input", CommandInput)
             
-            # Insert the path at the cursor position or append if empty
+            # Insert the path with # prefix at the cursor position or append if empty
             current_text = command_input.text
             if current_text:
                 # Add space before the path only if current text does not end with whitespace
                 if not current_text[-1].isspace():
-                    command_input.insert(f" {relative_path} ")
+                    command_input.insert(f" #{relative_path} ")
                 else:
-                    command_input.insert(f"{relative_path} ")
+                    command_input.insert(f"#{relative_path} ")
             else:
-                command_input.insert(f"{relative_path} ")
+                command_input.insert(f"#{relative_path} ")
             
             # Close the file explorer
             self.action_toggle_files()
@@ -8360,9 +7927,9 @@ Falling back to standard chat...
             command_input.focus()
             
         except Exception as e:
-            # If there's an error, just use the absolute path
+            # If there's an error, just use the absolute path with # prefix
             command_input = self.query_one("#command-input", CommandInput)
-            command_input.insert(str(file_path))
+            command_input.insert(f"#{str(file_path)} ")
             self.action_toggle_files()
             command_input.focus()
     

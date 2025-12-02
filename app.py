@@ -56,7 +56,7 @@ def main():
     agent_config = config_manager.get_setting('agent_model_config')
     agent_model = initialize_agent_model(endpoint=agent_config['default_endpoint'], model_name=agent_config['default_model'])
     plugin_manager = PluginManager(config_manager, model=agent_model)
-    bot = ChatBot(agent_model=agent_model, config_manager=config_manager, plugin_manager=plugin_manager)
+    bot = ChatBot(agent_model=agent_model, config_manager=config_manager, plugin_manager=plugin_manager, is_cli=True)
 
     if args.agent:
         bot.plugin_manager.run_plugin(args.agent, bot.context_manager.conversation_history, **parse_key_value_pairs(args.params) if args.params else {})

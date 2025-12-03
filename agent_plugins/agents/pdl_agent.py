@@ -63,7 +63,8 @@ class MyCustomPlugin(AgentPlugin):
         # Menu choices
         choices = [
             ("1", "Convert SPF to PDL"),
-            ("2", "PDL Expert Consultation (interactive Q&A)")
+            ("2", "PDL Expert Consultation (interactive Q&A)"),
+            ("3", "Create/Update PDL Knowledge Base")
         ]
         
         selected_index = 0
@@ -148,41 +149,28 @@ class MyCustomPlugin(AgentPlugin):
         try:
             self.rag_kb = RAGKnowledgeBase(
                 pdf_dir=resources_dir,
-                cache_dir=resources_dir,  # Use same location for cache and RAG
+                cache_dir=resources_dir / ".rag_cache",
                 chunk_size=1000,
                 chunk_overlap=200,
-                collection_name="tessent_pdl_knowledge"
+                collection_name="pdl_knowledge_base"
             )
             
-            # Load PDF manuals into RAG system (will use cache if available)
-            pdf_files = [
-                "tessent_shell_reference_manual.pdf",
-                "tessent_cell_library_manual.pdf",
-                "DTEG_ITPP_Reader_Commands.pdf"
-            ]
-            self.rag_kb.load_pdfs(pdf_files, force_reload=False)
+            # Check if database already exists
+            existing_count = self.rag_kb.collection.count()
             
-            # Load SPF documentation files (.docx)
-            spf_doc_files = [
-                "Pattern_Framework_Spec_Template.docx",
-                "Pattern_Framework_Spec_Test.docx",
-                "SPF_CPP_API_Reference.docx"
-            ]
-            self.rag_kb.load_docx_files(spf_doc_files, force_reload=False)
-            
-            # Also load example.pdl as a text document into RAG
-            example_pdl_path = resources_dir / "example.pdl"
-            if example_pdl_path.exists():
-                self.rag_kb.load_text_file(example_pdl_path, source_name="example.pdl")
-                self.console.print(f"[green]✓ example.pdl loaded into RAG KB[/green]")
-            
-            # Display stats
-            stats = self.rag_kb.get_stats()
-            self.console.print(f"[green]✓ RAG KB ready: {stats['total_chunks']} chunks available[/green]")
+            if existing_count == 0:
+                self.console.print("[yellow]⚠ PDL Knowledge Base is empty or not initialized.[/yellow]")
+                self.console.print("[dim]The knowledge base needs to be populated with PDL documentation and examples.[/dim]\n")
+                
+                # Don't automatically create in __init__ - let user choose via mode 3
+                self.console.print("[bold cyan]💡 Tip:[/bold cyan] Use option '3. Create/Update PDL Knowledge Base' to populate the database.\n")
+            else:
+                stats = self.rag_kb.get_stats()
+                self.console.print(f"[green]✓ Knowledge base loaded: {stats['total_chunks']} chunks from {stats['total_documents']} documents[/green]")
             
         except Exception as e:
-            self.console.print(f"[yellow]⚠ RAG initialization failed: {e}[/yellow]")
-            self.console.print("[yellow]Falling back to legacy knowledge base loading...[/yellow]")
+            self.console.print(f"[yellow]⚠ RAG Knowledge Base initialization failed: {e}[/yellow]")
+            self.console.print("[dim]Will use legacy knowledge base as fallback[/dim]")
             self.rag_kb = None
         
         # Create specialized agents for two-stage conversion
@@ -267,10 +255,9 @@ class MyCustomPlugin(AgentPlugin):
         You will work in TWO stages with relevant Tessent manual knowledge provided.
         """
         
-        return Agent(
+        return Agent[str](
             model=model,
             system_prompt=system_prompt,
-            result_type=str,
             retries=3
         )
     
@@ -329,10 +316,9 @@ class MyCustomPlugin(AgentPlugin):
         6. Use register.FIELD_NAME only when SPF uses named fields
         """
         
-        return Agent(
+        return Agent[str](
             model=model,
             system_prompt=system_prompt,
-            result_type=str,
             retries=2
         )
     
@@ -436,10 +422,9 @@ class MyCustomPlugin(AgentPlugin):
         [Confirm parameter formats match the examples (hex/binary/decimal/string)]
         """
         
-        return Agent(
+        return Agent[str](
             model=model,
             system_prompt=system_prompt,
-            result_type=str,
             retries=3
         )
     
@@ -520,10 +505,9 @@ class MyCustomPlugin(AgentPlugin):
         Use proper Markdown formatting in ALL responses.
         """
         
-        return Agent(
+        return Agent[str](
             model=model,
             system_prompt=system_prompt,
-            result_type=str,
             retries=2
         )
     
@@ -935,6 +919,7 @@ class MyCustomPlugin(AgentPlugin):
         The agent remembers previous questions and answers in the session.
         """
         from rich.markdown import Markdown
+        from rich.prompt import Confirm
         
         # Display header
         self.console.rule("[bold blue]PDL Expert Consultation Mode[/bold blue]", style="blue")
@@ -947,10 +932,21 @@ class MyCustomPlugin(AgentPlugin):
         # Check RAG knowledge base
         if self.rag_kb:
             stats = self.rag_kb.get_stats()
-            self.console.print(f"[green]✓ Knowledge base loaded: {stats['total_chunks']} chunks available[/green]")
-            self.console.print(f"[green]✓ example.pdl loaded in knowledge base[/green]\n")
+            if stats['total_chunks'] == 0:
+                self.console.print("[yellow]⚠ PDL Knowledge Base is empty.[/yellow]")
+                if Confirm.ask("Would you like to create the database now?", default=True):
+                    return self.run_database_management_mode(context, **kwargs)
+                else:
+                    self.console.print("[dim]Continuing with limited knowledge...[/dim]\n")
+            else:
+                self.console.print(f"[green]✓ Knowledge base loaded: {stats['total_chunks']} chunks available[/green]")
+                self.console.print(f"[dim]Sources: {', '.join(stats['sources'][:5])}{'...' if len(stats['sources']) > 5 else ''}[/dim]\n")
         else:
-            self.console.print("[yellow]⚠ RAG knowledge base not available. Using legacy mode.[/yellow]\n")
+            self.console.print("[yellow]⚠ RAG knowledge base not available.[/yellow]")
+            if Confirm.ask("Would you like to create the database now?", default=True):
+                return self.run_database_management_mode(context, **kwargs)
+            else:
+                self.console.print("[dim]Continuing with limited knowledge...[/dim]\n")
         
         # Interactive loop with conversation history
         session_history = []
@@ -1076,14 +1072,254 @@ class MyCustomPlugin(AgentPlugin):
         if mode == '2':
             # PDL Expert consultation mode
             return self.run_pdl_expert_mode(context, **kwargs)
+        elif mode == '3':
+            # Database Management Mode
+            return self.run_database_management_mode(context, **kwargs)
         else:
             # SPF to PDL conversion mode (default)
             return self.run_spf_conversion_mode(context, **kwargs)
+    
+    def run_database_management_mode(self, context, **kwargs):
+        """
+        Database management workflow - create or update the PDL knowledge base.
+        """
+        from rich.prompt import Confirm
+        from rich.table import Table
+        
+        # Display header
+        self.console.rule("[bold blue]PDL Knowledge Base Management[/bold blue]", style="blue")
+        
+        # Reinitialize RAG if needed
+        if self.rag_kb is None:
+            agent_dir = Path(__file__).parent
+            resources_dir = agent_dir / "pdl_agent_resources"
+            resources_dir.mkdir(parents=True, exist_ok=True)
+            
+            try:
+                self.rag_kb = RAGKnowledgeBase(
+                    pdf_dir=resources_dir,
+                    cache_dir=resources_dir / ".rag_cache",
+                    collection_name="pdl_knowledge_base"
+                )
+            except Exception as e:
+                self.console.print(f"[bold red]Error:[/bold red] Failed to initialize knowledge base: {e}")
+                return "Database initialization failed"
+        
+        # Show current database stats
+        stats = self.rag_kb.get_stats()
+        
+        table = Table(title="Current Database Status", show_header=True, header_style="bold cyan")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        
+        table.add_row("Total Documents", str(stats['total_documents']))
+        table.add_row("Total Chunks", str(stats['total_chunks']))
+        table.add_row("Sources", ", ".join(stats['sources']) if stats['sources'] else "None")
+        
+        self.console.print()
+        self.console.print(table)
+        self.console.print()
+        
+        # Ask user what they want to do
+        self.console.print("[bold cyan]Options:[/bold cyan]")
+        self.console.print("  1. Add PDF files to database")
+        self.console.print("  2. Add DOCX files to database")
+        self.console.print("  3. Add text files (.pdl, .spf, .txt, etc.) to database")
+        self.console.print("  4. Load default PDL documentation (from resources folder)")
+        self.console.print("  5. Clear and rebuild database")
+        self.console.print("  6. Exit\n")
+        
+        choice = self.console.input("[bold cyan]Select option (1-6):[/bold cyan] ").strip()
+        
+        if choice == '1':
+            # Add PDF files
+            self.console.print("\n[bold cyan]Add PDF Files[/bold cyan]")
+            self.console.print("[dim]Enter file paths (one per line). Press Enter on empty line when done.[/dim]")
+            
+            pdf_files = []
+            while True:
+                file_path = self.console.input("[cyan]PDF file path:[/cyan] ").strip()
+                if not file_path:
+                    break
+                if Path(file_path).exists():
+                    pdf_files.append(file_path)
+                    self.console.print(f"[green]✓ Added: {file_path}[/green]")
+                else:
+                    self.console.print(f"[yellow]⚠ File not found: {file_path}[/yellow]")
+            
+            if pdf_files:
+                force_reload = Confirm.ask("Force reload if already processed?", default=False)
+                self.rag_kb.load_pdfs(pdf_files, force_reload=force_reload)
+                self.console.print("[green]✓ PDF files processed successfully[/green]")
+            else:
+                self.console.print("[yellow]No files added[/yellow]")
+        
+        elif choice == '2':
+            # Add DOCX files
+            self.console.print("\n[bold cyan]Add DOCX Files[/bold cyan]")
+            self.console.print("[dim]Enter file paths (one per line). Press Enter on empty line when done.[/dim]")
+            
+            docx_files = []
+            while True:
+                file_path = self.console.input("[cyan]DOCX file path:[/cyan] ").strip()
+                if not file_path:
+                    break
+                if Path(file_path).exists():
+                    docx_files.append(file_path)
+                    self.console.print(f"[green]✓ Added: {file_path}[/green]")
+                else:
+                    self.console.print(f"[yellow]⚠ File not found: {file_path}[/yellow]")
+            
+            if docx_files:
+                force_reload = Confirm.ask("Force reload if already processed?", default=False)
+                self.rag_kb.load_docx_files(docx_files, force_reload=force_reload)
+                self.console.print("[green]✓ DOCX files processed successfully[/green]")
+            else:
+                self.console.print("[yellow]No files added[/yellow]")
+        
+        elif choice == '3':
+            # Add text files
+            self.console.print("\n[bold cyan]Add Text Files[/bold cyan]")
+            self.console.print("[dim]Enter file paths (one per line). Press Enter on empty line when done.[/dim]")
+            self.console.print("[dim]Supported: .pdl, .spf, .txt, .md, .py, .c, .cpp, .json, .xml, .log, etc.[/dim]\n")
+            
+            text_files = []
+            while True:
+                file_path = self.console.input("[cyan]Text file path:[/cyan] ").strip()
+                if not file_path:
+                    break
+                if Path(file_path).exists():
+                    text_files.append(file_path)
+                    self.console.print(f"[green]✓ Added: {file_path}[/green]")
+                else:
+                    self.console.print(f"[yellow]⚠ File not found: {file_path}[/yellow]")
+            
+            if text_files:
+                force_reload = Confirm.ask("Force reload if already processed?", default=False)
+                for text_file in text_files:
+                    file_path = Path(text_file)
+                    self.rag_kb.load_text_file(file_path, source_name=file_path.name, force_reload=force_reload)
+                self.console.print("[green]✓ Text files processed successfully[/green]")
+            else:
+                self.console.print("[yellow]No files added[/yellow]")
+        
+        elif choice == '4':
+            # Load default documentation
+            self.console.print("\n[bold cyan]Loading Default PDL Documentation[/bold cyan]")
+            
+            resources_dir = self.agent_dir / "pdl_agent_resources"
+            
+            # Default PDF files
+            pdf_files = [
+                "tessent_shell_reference_manual.pdf",
+                "tessent_cell_library_manual.pdf",
+                "DTEG_ITPP_Reader_Commands.pdf"
+            ]
+            
+            # Check which files exist
+            existing_pdfs = []
+            for pdf_file in pdf_files:
+                pdf_path = resources_dir / pdf_file
+                if pdf_path.exists():
+                    existing_pdfs.append(str(pdf_path))
+                else:
+                    self.console.print(f"[yellow]⚠ Not found: {pdf_file}[/yellow]")
+            
+            if existing_pdfs:
+                force_reload = Confirm.ask("Force reload if already processed?", default=False)
+                self.rag_kb.load_pdfs(existing_pdfs, force_reload=force_reload)
+            else:
+                self.console.print("[yellow]⚠ No default PDF files found in resources folder[/yellow]")
+            
+            # Load example PDL and SPF files
+            example_pdl = resources_dir / "example.pdl"
+            if example_pdl.exists():
+                force_reload = Confirm.ask("Force reload example.pdl if already processed?", default=False)
+                self.rag_kb.load_text_file(example_pdl, source_name="example.pdl", force_reload=force_reload)
+                self.console.print("[green]✓ Loaded example.pdl[/green]")
+            else:
+                self.console.print("[yellow]⚠ example.pdl not found[/yellow]")
+            
+            example_spf = resources_dir / "example.spf"
+            if example_spf.exists():
+                force_reload = Confirm.ask("Force reload example.spf if already processed?", default=False)
+                self.rag_kb.load_text_file(example_spf, source_name="example.spf", force_reload=force_reload)
+                self.console.print("[green]✓ Loaded example.spf[/green]")
+            else:
+                self.console.print("[yellow]⚠ example.spf not found[/yellow]")
+            
+            self.console.print("\n[green]✓ Default documentation loaded[/green]")
+        
+        elif choice == '5':
+            # Clear and rebuild
+            if Confirm.ask("[bold red]⚠ This will delete all existing database contents. Continue?[/bold red]", default=False):
+                self.console.print("\n[yellow]Clearing database...[/yellow]")
+                
+                # Delete the ChromaDB directory
+                chroma_path = self.agent_dir / "pdl_agent_resources" / ".rag_cache" / "chroma_db"
+                if chroma_path.exists():
+                    import shutil
+                    shutil.rmtree(chroma_path)
+                    self.console.print("[green]✓ Database cleared[/green]")
+                
+                # Clear processed docs cache
+                cache_file = self.agent_dir / "pdl_agent_resources" / ".rag_cache" / "processed_docs.json"
+                if cache_file.exists():
+                    cache_file.unlink()
+                
+                # Reinitialize
+                resources_dir = self.agent_dir / "pdl_agent_resources"
+                self.rag_kb = RAGKnowledgeBase(
+                    pdf_dir=resources_dir,
+                    cache_dir=resources_dir / ".rag_cache",
+                    collection_name="pdl_knowledge_base"
+                )
+                
+                self.console.print("[green]✓ Database reinitialized[/green]")
+                self.console.print("[dim]You can now add files to the database[/dim]")
+            else:
+                self.console.print("[yellow]Operation cancelled[/yellow]")
+        
+        elif choice == '6':
+            self.console.print("[dim]Exiting database management[/dim]")
+            return "Database management completed"
+        
+        else:
+            self.console.print("[yellow]Invalid option[/yellow]")
+        
+        # Show updated stats
+        self.console.print("\n[bold cyan]Updated Database Status:[/bold cyan]")
+        stats = self.rag_kb.get_stats()
+        
+        table = Table(show_header=True, header_style="bold cyan")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        
+        table.add_row("Total Documents", str(stats['total_documents']))
+        table.add_row("Total Chunks", str(stats['total_chunks']))
+        table.add_row("Sources", ", ".join(stats['sources']) if stats['sources'] else "None")
+        
+        self.console.print(table)
+        self.console.print()
+        
+        return "Database management completed successfully"
     
     def run_spf_conversion_mode(self, context, **kwargs):
         """
         SPF to PDL conversion workflow.
         """
+        from rich.prompt import Confirm
+        
+        # Check if database is available
+        if self.rag_kb is None or self.rag_kb.get_stats()['total_chunks'] == 0:
+            self.console.print("[yellow]⚠ PDL Knowledge Base is empty or not initialized.[/yellow]")
+            self.console.print("[dim]The knowledge base is needed for accurate PDL conversion.[/dim]\n")
+            
+            if Confirm.ask("Would you like to create/update the database now?", default=True):
+                return self.run_database_management_mode(context, **kwargs)
+            else:
+                self.console.print("[yellow]⚠ Warning: Proceeding without knowledge base may result in less accurate conversions.[/yellow]\n")
+        
         # Get input_path from initializer_args
         input_path = self.initializer_args.get('input_path')
         

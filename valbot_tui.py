@@ -4868,15 +4868,30 @@ Please check your configuration and try again.
             # Handle /reload BEFORE CommandManager to avoid blocking Confirm.ask()
             chat_panel.add_message("system", """### ↻ Reload Configuration
 
-Restarting TUI to reload configuration...
+Relaunching TUI process to apply all file changes...
 """)
-            # Set restart flag and schedule exit
-            self.app.should_restart = True
             
-            def do_restart():
+            # Relaunch the entire Python process with the same arguments
+            import subprocess
+            
+            def do_relaunch():
+                # Get the current script path and arguments
+                script_path = sys.argv[0]
+                args = sys.argv[1:]  # Preserve command-line arguments
+                
+                # Exit the app first
                 self.app.exit()
+                
+                # Relaunch the process
+                if sys.platform == "win32":
+                    # Windows: use subprocess.Popen to start detached process
+                    subprocess.Popen([sys.executable, script_path] + args, 
+                                   creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.DETACHED_PROCESS)
+                else:
+                    # Unix: use os.execv to replace current process
+                    os.execv(sys.executable, [sys.executable, script_path] + args)
             
-            self.set_timer(0.5, do_restart)
+            self.set_timer(0.5, do_relaunch)
             return True  # Return immediately after scheduling
         
         elif cmd == "/update":

@@ -482,7 +482,7 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
                     # Remove duplicates while preserving order
                     unique_tools = list(dict.fromkeys(tool_calls))
                     tools_used = ", ".join([f"[cyan]{tool}[/cyan]" for tool in unique_tools])
-                    self.console.print(f"[dim]🔧 Tools used: {tools_used}[/dim]\n")
+                    # self.console.print(f"[dim]🔧 Tools used: {tools_used}[/dim]\n")
             
             # Display the response - use .output instead of .data
             response_text = str(result.output) if hasattr(result, 'output') else str(result)

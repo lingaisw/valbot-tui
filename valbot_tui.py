@@ -196,7 +196,7 @@ except ImportError:
 
 
 # Platform-specific emoji/symbol mapping
-print(sys.platform)
+# print(sys.platform)
 IS_LINUX = sys.platform.startswith('linux')
 
 # Define emoji mappings based on platform
@@ -4589,8 +4589,8 @@ Please check your configuration and try again.
         """Handle selection from inline picker."""
         selected_value = event.value
         
-        # Check if AI is processing - block selection
-        if self.processing and selected_value is not None:
+        # Check if AI is processing - block selection EXCEPT for command confirmation
+        if self.processing and selected_value is not None and self._active_picker_type != 'command_confirm':
             self.app.notify(
                 "⚠️ AI is busy.\nPress `Esc` to cancel current response.",
                 severity="warning",
@@ -4794,7 +4794,7 @@ Please check your configuration and try again.
         import re
         # Replace #filepath patterns with filepath (preserving spaces)
         # Match # followed by non-whitespace characters (file path)
-        return re.sub(r'#([^\s]+)', r'\1', command)
+        return re.sub(r'#([^\s]+)', r'./\1' if IS_LINUX else r'.\\\1', command)
     
     def _format_file_references(self, message: str) -> str:
         """Format file references in chat messages.
@@ -5521,11 +5521,49 @@ You can manually edit your configuration file at:
             )
             
             command_input_state['waiting_for_input'] = True
-            command_input_state['prompt_text'] = clean_prompt
-            command_input_state['result'] = None
-            command_input_state['ready'].clear()
+
             
-            command_input_state['ready'].wait()
+            command_input_state['prompt_text'] = clean_prompt
+
+            
+            command_input_state['result'] = None
+
+            
+            command_input_state['ready'].clear()
+
+            
+            
+
+            
+            # Wait with timeout to prevent hanging
+
+            
+            if not command_input_state['ready'].wait(timeout=300):  # 5 minute timeout
+
+            
+                command_input_state['waiting_for_input'] = False
+
+            
+                self.app.call_from_thread(
+
+            
+                    chat_panel.add_message,
+
+            
+                    "error",
+
+            
+                    "⏱️ Input timeout - command cancelled"
+
+            
+                )
+
+            
+                return default if default else ""
+
+            
+            
+
             
             result = command_input_state['result']
             command_input_state['waiting_for_input'] = False
@@ -5551,11 +5589,49 @@ You can manually edit your configuration file at:
             )
             
             command_input_state['waiting_for_input'] = True
-            command_input_state['prompt_text'] = clean_prompt
-            command_input_state['result'] = None
-            command_input_state['ready'].clear()
+
             
-            command_input_state['ready'].wait()
+            command_input_state['prompt_text'] = clean_prompt
+
+            
+            command_input_state['result'] = None
+
+            
+            command_input_state['ready'].clear()
+
+            
+            
+
+            
+            # Wait with timeout to prevent hanging
+
+            
+            if not command_input_state['ready'].wait(timeout=300):  # 5 minute timeout
+
+            
+                command_input_state['waiting_for_input'] = False
+
+            
+                self.app.call_from_thread(
+
+            
+                    chat_panel.add_message,
+
+            
+                    "error",
+
+            
+                    "⏱️ Input timeout - command cancelled"
+
+            
+                )
+
+            
+                return default if default else ""
+
+            
+            
+
             
             result = command_input_state['result']
             command_input_state['waiting_for_input'] = False
@@ -5729,11 +5805,49 @@ You can manually edit your configuration file at:
             )
             
             command_input_state['waiting_for_input'] = True
-            command_input_state['prompt_text'] = clean_prompt
-            command_input_state['result'] = None
-            command_input_state['ready'].clear()
+
             
-            command_input_state['ready'].wait()
+            command_input_state['prompt_text'] = clean_prompt
+
+            
+            command_input_state['result'] = None
+
+            
+            command_input_state['ready'].clear()
+
+            
+            
+
+            
+            # Wait with timeout to prevent hanging
+
+            
+            if not command_input_state['ready'].wait(timeout=300):  # 5 minute timeout
+
+            
+                command_input_state['waiting_for_input'] = False
+
+            
+                self.app.call_from_thread(
+
+            
+                    chat_panel.add_message,
+
+            
+                    "error",
+
+            
+                    "⏱️ Input timeout - command cancelled"
+
+            
+                )
+
+            
+                return default if default else ""
+
+            
+            
+
             
             result = command_input_state['result']
             command_input_state['waiting_for_input'] = False
@@ -5759,11 +5873,49 @@ You can manually edit your configuration file at:
             )
             
             command_input_state['waiting_for_input'] = True
-            command_input_state['prompt_text'] = clean_prompt
-            command_input_state['result'] = None
-            command_input_state['ready'].clear()
+
             
-            command_input_state['ready'].wait()
+            command_input_state['prompt_text'] = clean_prompt
+
+            
+            command_input_state['result'] = None
+
+            
+            command_input_state['ready'].clear()
+
+            
+            
+
+            
+            # Wait with timeout to prevent hanging
+
+            
+            if not command_input_state['ready'].wait(timeout=300):  # 5 minute timeout
+
+            
+                command_input_state['waiting_for_input'] = False
+
+            
+                self.app.call_from_thread(
+
+            
+                    chat_panel.add_message,
+
+            
+                    "error",
+
+            
+                    "⏱️ Input timeout - command cancelled"
+
+            
+                )
+
+            
+                return default if default else ""
+
+            
+            
+
             
             result = command_input_state['result']
             command_input_state['waiting_for_input'] = False
@@ -5920,11 +6072,49 @@ You can manually edit your configuration file at:
             )
             
             command_input_state['waiting_for_input'] = True
-            command_input_state['prompt_text'] = clean_prompt
-            command_input_state['result'] = None
-            command_input_state['ready'].clear()
+
             
-            command_input_state['ready'].wait()
+            command_input_state['prompt_text'] = clean_prompt
+
+            
+            command_input_state['result'] = None
+
+            
+            command_input_state['ready'].clear()
+
+            
+            
+
+            
+            # Wait with timeout to prevent hanging
+
+            
+            if not command_input_state['ready'].wait(timeout=300):  # 5 minute timeout
+
+            
+                command_input_state['waiting_for_input'] = False
+
+            
+                self.app.call_from_thread(
+
+            
+                    chat_panel.add_message,
+
+            
+                    "error",
+
+            
+                    "⏱️ Input timeout - command cancelled"
+
+            
+                )
+
+            
+                return default if default else ""
+
+            
+            
+
             
             result = command_input_state['result']
             command_input_state['waiting_for_input'] = False
@@ -5950,11 +6140,49 @@ You can manually edit your configuration file at:
             )
             
             command_input_state['waiting_for_input'] = True
-            command_input_state['prompt_text'] = clean_prompt
-            command_input_state['result'] = None
-            command_input_state['ready'].clear()
+
             
-            command_input_state['ready'].wait()
+            command_input_state['prompt_text'] = clean_prompt
+
+            
+            command_input_state['result'] = None
+
+            
+            command_input_state['ready'].clear()
+
+            
+            
+
+            
+            # Wait with timeout to prevent hanging
+
+            
+            if not command_input_state['ready'].wait(timeout=300):  # 5 minute timeout
+
+            
+                command_input_state['waiting_for_input'] = False
+
+            
+                self.app.call_from_thread(
+
+            
+                    chat_panel.add_message,
+
+            
+                    "error",
+
+            
+                    "⏱️ Input timeout - command cancelled"
+
+            
+                )
+
+            
+                return default if default else ""
+
+            
+            
+
             
             result = command_input_state['result']
             command_input_state['waiting_for_input'] = False
@@ -7247,8 +7475,10 @@ ChatBot is not ready. Please check your configuration.
         
         # Check if the message references local files first (always check this)
         detected_files = []
+        enhanced_message = message  # Will be enhanced if files are detected
+        
         if self.chatbot.agent_model:
-            _, detected_files = self.chatbot._should_use_tools(message)
+            detected_files = self.chatbot._detect_file_paths(message)
             
             # Add detected files to context chip bar AND load into context manager
             if detected_files:
@@ -7259,6 +7489,14 @@ ChatBot is not ready. Please check your configuration.
                 # This ensures files are read with chonkie chunking and proper formatting
                 try:
                     self.chatbot.context_manager.load_context(detected_files, silent=True)
+                    
+                    # Enhance the message to clarify that detected words are file paths
+                    # This helps the AI understand the context better
+                    import os
+                    cwd = os.getcwd()
+                    file_list = ", ".join([f"`{f}`" for f in detected_files])
+                    enhanced_message = f"{message}\n\n[Note: The following file(s) from the current directory ({cwd}) have been loaded into context: {file_list}]"
+                    
                 except Exception as e:
                     # Log error but don't fail the request
                     error_msg = f"⚠️ Warning: Failed to load file(s) into context: {str(e)}"
@@ -7271,12 +7509,12 @@ ChatBot is not ready. Please check your configuration.
         if detected_files and has_active_database:
             # Files are already loaded into context manager above
             # Now handle RAG query which will include the file context automatically
-            self._handle_rag_query(message)
+            self._handle_rag_query(enhanced_message)
             return
         
         # Check if RAG database is active (and no local files) - handle with RAG only
         if has_active_database:
-            self._handle_rag_query(message)
+            self._handle_rag_query(enhanced_message)
             return
         
         # Set processing state in UI thread
@@ -7286,9 +7524,12 @@ ChatBot is not ready. Please check your configuration.
         self.app.call_from_thread(self._add_loading_message)
         
         try:
-            # Use standard chat (files already loaded into context_manager if detected above)
-            # This handles: no files + no RAG, or files detected + no RAG
-            self._send_standard_message_sync(message)
+            # Use tool-enabled agent if available - let the AI decide when to use tools dynamically
+            # Otherwise fall back to standard chat
+            if self.chatbot.agent_model and self.chatbot.tool_agent:
+                self._send_with_tools(enhanced_message)
+            else:
+                self._send_standard_message_sync(enhanced_message)
                 
         except Exception as e:
 
@@ -7445,6 +7686,24 @@ An error occurred while processing your message:
             
             # Remove loading indicator
             self.app.call_from_thread(self._remove_loading_message)
+            
+            # Display which tools were used (if any)
+            if hasattr(result, 'all_messages'):
+                tool_calls = []
+                for msg in result.all_messages():
+                    if hasattr(msg, 'parts'):
+                        for part in msg.parts:
+                            if hasattr(part, 'tool_name'):
+                                tool_calls.append(part.tool_name)
+                
+                if tool_calls:
+                    # Remove duplicates while preserving order
+                    unique_tools = list(dict.fromkeys(tool_calls))
+                    tools_used = ", ".join([f"`{tool}`" for tool in unique_tools])
+                    # self.app.call_from_thread(
+                    #     self._add_system_message, 
+                    #     f"🔧 **Tools used:** {tools_used}"
+                    # )
             
             # Display the response - use .output instead of .data
             response_text = str(result.output) if hasattr(result, 'output') else str(result)

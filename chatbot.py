@@ -4,6 +4,8 @@ import subprocess
 import tempfile
 import sys
 import threading
+import asyncio
+import fnmatch
 from time import monotonic
 from rich.spinner import Spinner
 from typing import List, Union, Optional
@@ -15,6 +17,7 @@ from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
 from rich.prompt import Prompt, Confirm
+from typing import Any
 
 from bot_commands import Command, PromptCommand, CommandManager
 import config as configuration
@@ -43,13 +46,7 @@ from agent_plugins.common_tools.file_tools import (
     list_files_in_directory,
     find_files_with_name
 )
-from agent_plugins.common_tools.terminal_tools import (
-    list_files,
-    find_files,
-    grep_in_files,
-    show_file_tree,
-    run_shell_command
-)
+# Terminal tools are now integrated directly in ChatBot class
 
 @dataclass
 class ChatDeps:
@@ -103,6 +100,9 @@ class ChatBot:
         display_conversation_id = self.config_manager.get_setting('cloud_settings.display_conversation_id', False)
         self.prompt_display = PromptDisplay(lambda: self.cloud_sync_enabled, lambda: self._conversation_id, display_conversation_id)
         
+        # Command confirmation state
+        self._pending_command = None
+        
         # Store agent_model and create pydantic-ai agent with file/terminal tools
         self.agent_model = agent_model
         self.tool_agent = None  # Initialize to None
@@ -114,6 +114,226 @@ class ChatBot:
                 self.console.print(f"[yellow]⚠ Could not initialize tool agent: {e}[/yellow]")
                 self.agent_model = None  # Disable tools if setup fails
 
+    # ============================================================================
+    # Terminal Tools - Integrated for TUI Console Output
+    # ============================================================================
+    
+    async def list_files(self, ctx: RunContext, directory: str = '.', pattern: str = '*', recursive: bool = False) -> list[str]:
+        """
+        List files in the given directory matching a pattern.
+        Optionally search recursively.
+        Args:
+            directory (str): Directory to search in.
+            pattern (str): Pattern to match files, e.g. '*.py'.
+            recursive (bool): If True, search subdirs as well.
+        Returns:
+            list[str]: List of matched file paths (relative to directory).
+        """
+        if not recursive:
+            return fnmatch.filter(os.listdir(directory), pattern)
+        matches = []
+        for dirpath, _, filenames in os.walk(directory):
+            for name in fnmatch.filter(filenames, pattern):
+                matches.append(os.path.relpath(os.path.join(dirpath, name), directory))
+        return matches
+
+    async def find_files(self, ctx: RunContext, root_dir: str, file_name: str) -> list[str]:
+        """
+        Recursively finds files with a given name starting from root_dir.
+        Args:
+            root_dir (str): Root directory to search from.
+            file_name (str): Filename to search for (exact match).
+        Returns:
+            list[str]: Paths of found files.
+        """
+        self.console.print(Markdown(f"- Searching for files named `{file_name}` in `{root_dir}`"), markup=False)
+        matches = []
+        for dirpath, _, filenames in os.walk(root_dir):
+            for name in filenames:
+                if name == file_name:
+                    matches.append(os.path.join(dirpath, name))
+        return matches
+
+    async def grep_in_files(self, ctx: RunContext, directory: str, search_text: str, file_pattern: str = '*', case_sensitive: bool = True) -> list[tuple[str, int, str]]:
+        """
+        Search for text inside files under a directory (optionally filtered by pattern).
+        Args:
+            directory (str): Directory to search under.
+            search_text (str): Text to search for.
+            file_pattern (str): Only search files matching this pattern.
+            case_sensitive (bool): Whether the search is case-sensitive.
+        Returns:
+            list of tuples: (file_path, line_number, line_content) for each match.
+        """
+        self.console.print(Markdown(f"- Searching for `{search_text}` in files matching `{file_pattern}` under `{directory}`"), markup=False)
+        results = []
+        for dirpath, _, filenames in os.walk(directory):
+            for filename in fnmatch.filter(filenames, file_pattern):
+                file_path = os.path.join(dirpath, filename)
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        for idx, line in enumerate(f, start=1):
+                            hay = line if case_sensitive else line.lower()
+                            needle = search_text if case_sensitive else search_text.lower()
+                            if needle in hay:
+                                results.append((file_path, idx, line.strip()))
+                except Exception:
+                    pass
+        return results
+
+    async def show_file_tree(self, ctx: RunContext, start_path: str = '.', max_depth: int = 3) -> list[str]:
+        """
+        Returns a formatted tree of the directory structure (up to max_depth) as a list of strings.
+        Args:
+            start_path (str): Directory to start at.
+            max_depth (int): Maximum depth to show.
+        Returns:
+            list[str]: Lines representing the directory tree
+        """
+        from pathlib import Path
+        self.console.print(Markdown(f"- Getting file tree for `{start_path}`"), markup=False)
+        lines = []
+        def walk(path: Path, prefix: str, depth: int):
+            if depth > max_depth:
+                return
+            entries = list(path.iterdir())
+            for idx, entry in enumerate(sorted(entries, key=lambda e: (not e.is_dir(), e.name))):
+                is_last = idx == len(entries) - 1
+                branch = '┗━ ' if is_last else '┣━ '
+                lines.append(f"{prefix}{branch}{entry.name}")
+                if entry.is_dir():
+                    walk(entry, prefix + ('   ' if is_last else '┃  '), depth + 1)
+        walk(Path(start_path), '', 1)
+        return lines
+
+    async def check_platform(self, ctx: RunContext) -> dict[str, str]:
+        """
+        Check which platform the system is running on.
+        Returns:
+            dict: {"platform": ..., "description": ...}
+                platform values: 'win32' (Windows), 'linux', 'darwin' (macOS), 'cygwin', etc.
+        """
+        platform_descriptions = {
+            'win32': 'Windows',
+            'linux': 'Linux',
+            'darwin': 'macOS',
+            'cygwin': 'Windows/Cygwin',
+            'aix': 'AIX',
+            'freebsd': 'FreeBSD',
+            'openbsd': 'OpenBSD',
+            'netbsd': 'NetBSD',
+            'sunos': 'Solaris/SunOS'
+        }
+        platform = sys.platform
+        description = platform_descriptions.get(platform, f'Unknown ({platform})')
+        self.console.print(Markdown(f"- Platform: `{platform}` ({description})"), markup=False)
+        return {"platform": platform, "description": description}
+
+    async def run_shell_command(self, ctx: RunContext, command: str, cwd: Optional[str] = None, capture_output: bool = True, timeout: Optional[int] = 60) -> dict[str, Any]:
+        """
+        Run a shell command and return the result.
+        Asks user for confirmation via TUI inline picker before executing.
+        Args:
+            command (str): The shell command to execute.
+            cwd (str, optional): Current working dir to run in.
+            capture_output (bool): Whether to capture stdout/stderr.
+            timeout (int, optional): Seconds to wait before killing proc.
+        Returns:
+            dict: {"stdout": ..., "stderr": ..., "returncode": ...}
+        """
+        # Request user confirmation if in TUI mode
+        if not self.is_cli and hasattr(self.console, 'app'):
+            # Store pending command
+            self._pending_command = {
+                'command': command,
+                'cwd': cwd,
+                'capture_output': capture_output,
+                'timeout': timeout,
+                'approved': None
+            }
+            
+            # Show confirmation picker via TUI
+            try:
+                app = self.console.app
+                # Get the main screen (assuming it's the active screen)
+                if hasattr(app, 'screen') and hasattr(app.screen, 'show_inline_picker'):
+                    # Format command for display
+                    cmd_display = command[:80] + '...' if len(command) > 80 else command
+                    self.console.print(Markdown(f'**🔒 Please confirm "Allow" to run command:**\n```\n{cmd_display}\n```'), markup=False)
+                    
+                    # Set up callback to handle confirmation - this must be set BEFORE showing picker
+                    def handle_confirmation(choice):
+                        if self._pending_command:
+                            # Choice is now just the value string directly
+                            self._pending_command['approved'] = (choice == 'allow')
+                    
+                    # Set callback BEFORE calling show_inline_picker
+                    app.screen._picker_callback = handle_confirmation
+                    
+                    # Show picker using call_from_thread to avoid blocking
+                    app.call_from_thread(
+                        app.screen.show_inline_picker,
+                        "Run Command?",
+                        [
+                            ('Allow', 'allow'),
+                            ('Skip', 'skip')
+                        ],
+                        'command_confirm'
+                    )
+                    
+                    # Wait for user decision with polling (non-blocking)
+                    max_wait = 300  # 5 minutes
+                    wait_interval = 0.2
+                    elapsed = 0
+                    
+                    while self._pending_command and self._pending_command['approved'] is None and elapsed < max_wait:
+                        await asyncio.sleep(wait_interval)
+                        elapsed += wait_interval
+                    
+                    # Check result
+                    if not self._pending_command or self._pending_command['approved'] is None:
+                        self.console.print("[yellow]Command confirmation timed out. Skipping.[/yellow]")
+                        self._pending_command = None
+                        return {"stdout": "", "stderr": "User confirmation timeout", "returncode": -1}
+                    
+                    if not self._pending_command['approved']:
+                        self.console.print("[yellow]Command execution skipped by user.[/yellow]")
+                        self._pending_command = None
+                        return {"stdout": "", "stderr": "User skipped command", "returncode": -1}
+                    
+                    # Command approved!
+                    self.console.print("[green]✓ Command approved by user[/green]")
+            except Exception as e:
+                import traceback
+                self.console.print(f"[yellow]Could not show confirmation picker: {e}[/yellow]")
+                self.console.print(f"[dim]{traceback.format_exc()}[/dim]")
+                self.console.print("[yellow]Executing anyway.[/yellow]")
+        
+        # Execute the command
+        try:
+            self.console.print(Markdown(f"- Running: `{command}`"), markup=False)
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                cwd=cwd,
+                stdout=asyncio.subprocess.PIPE if capture_output else None,
+                stderr=asyncio.subprocess.PIPE if capture_output else None,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            except asyncio.TimeoutError:
+                proc.kill()
+                return {"stdout": "", "stderr": "Timeout expired", "returncode": -1}
+            return {
+                "stdout": (stdout.decode() if stdout else "") if capture_output else None,
+                "stderr": (stderr.decode() if stderr else "") if capture_output else None,
+                "returncode": proc.returncode,
+            }
+        except Exception as e:
+            return {"stdout": "", "stderr": str(e), "returncode": -1}
+        finally:
+            # Clear pending command
+            self._pending_command = None
+
     def _setup_tool_agent(self):
         """Setup pydantic-ai agent with file and terminal tools."""
         system_prompt = (
@@ -124,6 +344,7 @@ class ChatBot:
             '- Create, edit, and write files\n'
             '- Search text within files using grep\n'
             '- Display directory tree structures\n'
+            '- Check the current platform/operating system\n'
             '- Execute shell commands\n'
             '- Query Excel databases for file lists, sheets, schemas, and sample data\n\n'
             'When users ask about Excel files, sheets, columns, or data structure, use the Excel database tools. '
@@ -139,12 +360,13 @@ class ChatBot:
             instrument=True,
         )
         
-        # Register all file and terminal tools
-        self.tool_agent.tool(list_files)
-        self.tool_agent.tool(find_files)
-        self.tool_agent.tool(grep_in_files)
-        self.tool_agent.tool(show_file_tree)
-        self.tool_agent.tool(run_shell_command)
+        # Register all file and terminal tools (using instance methods)
+        self.tool_agent.tool(self.list_files)
+        self.tool_agent.tool(self.find_files)
+        self.tool_agent.tool(self.grep_in_files)
+        self.tool_agent.tool(self.show_file_tree)
+        self.tool_agent.tool(self.check_platform)
+        self.tool_agent.tool(self.run_shell_command)
         self.tool_agent.tool(file_read_tool)
         self.tool_agent.tool(read_partial_file)
         self.tool_agent.tool(create_file)
@@ -152,14 +374,6 @@ class ChatBot:
         self.tool_agent.tool(edit_string_in_file)
         self.tool_agent.tool(list_files_in_directory)
         self.tool_agent.tool(find_files_with_name)
-        
-        # Register Excel database tools
-        try:
-            from agent_plugins.common_tools.excel_database_tools import EXCEL_DATABASE_TOOLS
-            for tool_info in EXCEL_DATABASE_TOOLS:
-                self.tool_agent.tool(tool_info['function'])
-        except ImportError:
-            pass  # Excel tools not available
 
 
     def display_banner(self):
@@ -194,27 +408,22 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
         self.console.print(f"Chatting with: {self.modelname} (/model to change models)\n")
         self.context_manager.conversation_history.append({"role": "system", "content": self.config_manager.get_setting("chat_model_config.system_prompt", "You are a helpful assistant. Prioritize markdown format and code blocks when applicable.")})
 
-    def _should_use_tools(self, message: str) -> tuple[bool, list[str]]:
-        """Determine if a message should use the tool-enabled agent.
+    def _detect_file_paths(self, message: str) -> list[str]:
+        """Detect valid file paths in a message for informational purposes.
         
         Returns:
-            tuple: (should_use_tools: bool, detected_files: list[str])
+            list[str]: List of detected file paths
         """
-        message_lower = message.lower()
-        
-        # Check for valid file paths in the message
         import re
         from pathlib import Path
         
         # Look for potential file paths (with extensions or absolute/relative paths)
-        # Match patterns like: ./file.txt, ../dir/file.py, C:\path\file.js, /path/to/file, file.md, agent_plugins/init.py
-        # Also supports .gz compressed files like file.log.gz, document.pdf.gz
         file_path_patterns = [
-            r'[./\\][\w/\\.-]+(?:\.\w+)+',      # Relative paths starting with . or \ with extension(s) - supports .log.gz
+            r'[./\\][\w/\\.-]+(?:\.\w+)+',      # Relative paths starting with . or \ with extension(s)
             r'[A-Za-z]:\\[\w\\.-]+',             # Windows absolute paths
             r'/[\w/.-]+',                        # Unix-like absolute paths
-            r'\b[\w-]+(?:[/\\][\w-]+)+(?:\.\w+)+', # Subdirectory paths (word/word/file.ext) - supports .log.gz
-            r'(?<![/\\])(?<!\w)\b[\w-]+(?:\.\w{2,5})+\b(?![/\\])'  # Simple filenames - supports file.txt.gz
+            r'\b[\w-]+(?:[/\\][\w-]+)+(?:\.\w+)+', # Subdirectory paths (word/word/file.ext)
+            r'(?<![/\\])(?<!\w)\b[\w-]+(?:\.\w{2,5})+\b(?![/\\])'  # Simple filenames
         ]
         
         potential_paths = []
@@ -232,22 +441,13 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
             except:
                 continue
         
-        # Print all found files in a single message
-        valid_path_found = len(valid_files) > 0
-        if valid_path_found:
+        # Print found files for user awareness
+        if valid_files:
             files_str = ", ".join([f"[bold]{f}[/bold]" for f in valid_files])
             file_word = "file" if len(valid_files) == 1 else "files"
             self.console.print(f"Found local {file_word}: {files_str}")
-            return True, valid_files
         
-        # Keywords that suggest directory/file listing operations
-        directory_keywords = ['list files', 'show files', 'ls ', 'dir ', 'file tree', 
-                             'directory structure', 'show tree', 'list all', 'show all']
-        if any(keyword in message_lower for keyword in directory_keywords):
-            self.console.print(f"[dim]→ Using tools (directory operation)[/dim]")
-            return True, []
-        
-        return False, []
+        return valid_files
     
     async def send_message_with_tools(self, message: str):
         """Send a message using the tool-enabled pydantic-ai agent."""
@@ -268,6 +468,21 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
             # Run the agent with the user's message
             self.console.print("[dim]Running agent with tools...[/dim]")
             result = await self.tool_agent.run(message, deps=deps)
+            
+            # Display which tools were used (if any)
+            if hasattr(result, 'all_messages'):
+                tool_calls = []
+                for msg in result.all_messages():
+                    if hasattr(msg, 'parts'):
+                        for part in msg.parts:
+                            if hasattr(part, 'tool_name'):
+                                tool_calls.append(part.tool_name)
+                
+                if tool_calls:
+                    # Remove duplicates while preserving order
+                    unique_tools = list(dict.fromkeys(tool_calls))
+                    tools_used = ", ".join([f"[cyan]{tool}[/cyan]" for tool in unique_tools])
+                    self.console.print(f"[dim]🔧 Tools used: {tools_used}[/dim]\n")
             
             # Display the response - use .output instead of .data
             response_text = str(result.output) if hasattr(result, 'output') else str(result)

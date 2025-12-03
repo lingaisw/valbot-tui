@@ -4921,7 +4921,7 @@ Restarting TUI to reload configuration...
                     agent_options = [(f"{name}: {desc}", name) for name, desc in agents]
                     
                     # Show the inline picker first
-                    await self.show_inline_picker(f"{EMOJI['agent']} Select Agent Workflow", agent_options)
+                    await self.show_inline_picker(f"{EMOJI['agent']} Select Agent", agent_options)
                     
                     # Store callback for when selection is made (after picker is shown)
                     self._picker_callback = on_agent_selected
@@ -8073,7 +8073,7 @@ Falling back to standard chat...
                 # Format agents for display: show name and description
                 agent_options = [(f"{name}: {desc}", name) for name, desc in agents]
                 # Show the inline picker first (with 'agent' type for tracking)
-                await self.show_inline_picker(f"{EMOJI['robot']} Select Agent Workflow", agent_options, picker_type="agent")
+                await self.show_inline_picker(f"{EMOJI['agent']} Select Agent", agent_options, picker_type="agent")
                 # Store callback for when selection is made (after picker is shown)
                 self._picker_callback = on_agent_selected
             else:

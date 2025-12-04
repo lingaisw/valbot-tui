@@ -365,6 +365,39 @@ class MyCustomPlugin(AgentPlugin):
             - What data types are expected (integer, string, list, etc.)
             - Match parameter formats EXACTLY as shown in examples
         
+        16. CRITICAL - DYNAMIC REGISTER INSTANCE HANDLING (HIGHEST PRIORITY):
+            ALWAYS prioritize setting register instances dynamically using get_icl_instances and loops.
+            This is STRONGLY PREFERRED over hardcoding individual register names.
+            
+            ✓ CORRECT APPROACH (Dynamic - USE THIS):
+            ```
+            set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_JTAGControl_DR]]
+            foreach_in_collection reg $fuse_reg {
+                set reg_name [get_single_name $reg]
+                iWrite $reg_name.DIS_DCG 0x0
+                iWrite $reg_name.DEFER_SB 0x0
+                iWrite $reg_name.CLOCK_MUX 0x0
+                iApply
+            }
+            ```
+            
+            ✗ AVOID (Hardcoded - Only use if absolutely necessary):
+            ```
+            iWrite SECUREDSOCTAPC_MISCDFXCFG.core_out_sel 2
+            ```
+            
+            RULES FOR DYNAMIC APPROACH:
+            - When accessing registers of the same module/type, use get_icl_instances to get all instances
+            - Loop through instances using foreach_in_collection
+            - Extract instance name with get_single_name
+            - Apply operations to $reg_name variable (dynamically resolved)
+            - Benefits: Scalable, maintainable, works with multiple instances automatically
+            - ONLY use hardcoded register names when:
+              * Operating on a single specific register that won't scale
+              * The register is truly unique (not part of a repeated module)
+            - If test operations show multiple registers of similar type, ALWAYS use dynamic approach
+            - Look for patterns in register names that indicate module instances (common prefixes/suffixes)
+        
         Common PDL commands you should look for in examples (PRIORITIZE iSim commands):
         - iSim commands (CHECK THESE FIRST)  # Simulation commands (DTEG dftPdl) - PRIORITY
           - iSim poll_signal signal_path expected_value timeout step_size
@@ -375,16 +408,23 @@ class MyCustomPlugin(AgentPlugin):
             * Example: iSim macro_map my_signal pcd_tb.pcd.module.submodule.long_signal_name
             * Then use: iSim poll_signal `my_signal 0x1 10us 5ns
         - iProc <name> {args} { ... }  # Define procedure
-        - iWrite register.field value   # Write to register field
-        - iRead register.field value    # Read and check register field  
+        - iWrite register.field value   # Write to register field (prefer dynamic: $reg_name.field)
+        - iRead register.field value    # Read and check register field (prefer dynamic: $reg_name.field)
         - iApply                        # Apply the register operations
         - iCall procedure args          # Call another procedure
         - iRunLoop count -tck           # Run clock cycles
         - iNote "message"               # Add comment/note in PDL (USE THIS FREQUENTLY IN PDL CODE)
+        - get_icl_instances             # Get register/module instances (USE FOR DYNAMIC ACCESS)
+        - get_icl_module                # Get module definition (USE WITH get_icl_instances)
+        - get_single_name               # Extract name from instance object (USE IN LOOPS)
+        - foreach_in_collection         # Loop through collections (USE FOR DYNAMIC REGISTER ACCESS)
+        - set variable_name value       # Set TCL variable (USE TO STORE INSTANCE COLLECTIONS)
         
         BEFORE writing code, CHECK the examples for:
-        - iSim command parameters FIRST (poll_signal, peek_signal, macro_map)
+        - FIRST: Can registers be accessed dynamically? (get_icl_instances + foreach_in_collection)
+        - SECOND: iSim command parameters (poll_signal, peek_signal, macro_map)
         - Opportunities to use macro_map for repeated/long signal paths
+        - Opportunities to use dynamic register access instead of hardcoding
         - Parameter count and order for each command
         - Value formats (0x for hex, 0b for binary, decimal, quotes for strings)
         - Required vs optional parameters
@@ -446,6 +486,32 @@ class MyCustomPlugin(AgentPlugin):
            NOTE: These headers are required for PDL files only, not for SPF files
         8. Use iNote "description" liberally to document what PDL code is doing
            NOTE: iNote is a PDL command for documentation, not used in SPF
+        9. CRITICAL BEST PRACTICE - PRIORITIZE DYNAMIC REGISTER ACCESS:
+           When users ask about register access patterns, ALWAYS recommend the dynamic approach:
+           - Use get_icl_instances to get register/module instances dynamically
+           - Loop through instances with foreach_in_collection
+           - Extract names with get_single_name
+           - Apply operations to $reg_name variable
+           - This approach is STRONGLY PREFERRED over hardcoding individual register names
+           - Benefits: Scalable, maintainable, works with multiple instances automatically
+           
+           CORRECT (Dynamic - Always recommend this):
+           ```pdl
+           set fuse_reg [get_icl_instances -of_modules [get_icl_module fuse_cltap_JTAGControl_DR]]
+           foreach_in_collection reg $fuse_reg {
+               set reg_name [get_single_name $reg]
+               iWrite $reg_name.DIS_DCG 0x0
+               iWrite $reg_name.DEFER_SB 0x0
+               iApply
+           }
+           ```
+           
+           AVOID (Hardcoded - Only for truly unique registers):
+           ```pdl
+           iWrite SECUREDSOCTAPC_MISCDFXCFG.core_out_sel 2
+           ```
+           
+           Explain that hardcoding should only be used for truly unique, non-repeating registers.
         
         CRITICAL: Format ALL responses using proper Markdown:
         - Use ### for section headers
@@ -478,6 +544,7 @@ class MyCustomPlugin(AgentPlugin):
         
         Common PDL commands to reference:
         - iProc, iWrite, iRead, iApply, iCall, iRunLoop, iNote
+        - Dynamic access (PRIORITIZE THESE): get_icl_instances, get_icl_module, get_single_name, foreach_in_collection
         - iSim commands (DTEG dftPdl):
           - iSim poll_signal signal_path expected_value timeout step_size
           - iSim peek_signal signal_path expected_value
@@ -486,7 +553,6 @@ class MyCustomPlugin(AgentPlugin):
             * Define at start of procedures (e.g., in initialization iProc)
             * Reference with backtick prefix: `alias_name
         - TCL constructs: set, foreach_in_collection, if/else, for
-        - get_icl_instance, get_icl_module, get_single_name
         
         Be helpful, accurate, and always ground your answers in the documentation.
         Use proper Markdown formatting in ALL responses.
@@ -715,30 +781,38 @@ class MyCustomPlugin(AgentPlugin):
             10. Use iNote "description" in your PDL code to document what each section is doing
             10. If converting from SPF, use the SPF label values in your PDL iNote descriptions
                 NOTE: iNote is a PDL command - it's not used in SPF source files
-            11. PRESERVE EXACT signal paths and register names - do NOT modify, rename, or shorten them
-            12. Copy signal/register names character-for-character from the test operations description
-            13. CRITICAL: Distinguish bit numbers from field names:
+            11. CRITICAL - PRIORITIZE DYNAMIC REGISTER ACCESS:
+                - BEFORE writing any iWrite/iRead commands, check if registers can be accessed dynamically
+                - If test operations show multiple registers from the same module, use get_icl_instances
+                - Pattern: set reg_collection [get_icl_instances -of_modules [get_icl_module MODULE_NAME]]
+                - Then: foreach_in_collection reg $reg_collection {{{{ set reg_name [get_single_name $reg]; ... }}}}
+                - Only hardcode register names when dealing with truly unique, non-repeating registers
+                - Dynamic approach is ALWAYS preferred for scalability and maintainability
+            12. PRESERVE EXACT signal paths and register names - do NOT modify, rename, or shorten them
+            13. Copy signal/register names character-for-character from the test operations description
+            14. CRITICAL: Distinguish bit numbers from field names:
                 - If test operations show register[7] or register[15:8], that's BIT ACCESS, not a field
                 - Use register.FIELD_NAME only for actual named fields (e.g., register.Enable)
                 - DO NOT convert bit numbers to field names (register[7] ≠ register.7)
                 - Check PDL examples for proper bit/field access syntax
-            14. CRITICAL: Use explicit prefixes for ALL PDL values:
+            15. CRITICAL: Use explicit prefixes for ALL PDL values:
                 - Binary values: ALWAYS use 0b prefix (0b1, 0b0, 0b1010, 0b11111111)
                 - Hexadecimal values: ALWAYS use 0x prefix (0x0, 0x1234, 0xABCD, 0xFFFFFFFF)
                 - Decimal values: Use 0d prefix or no prefix (0d10, 0d255, or 100)
                 - NEVER write ambiguous values - always make the base explicit
                 - Examples: Write 0b1 not 1, write 0x10 not 10 (unless clearly decimal)
-            15. COMPULSORY: Check examples for parameter requirements BEFORE writing each command:
+            16. COMPULSORY: Check examples for parameter requirements BEFORE writing each command:
                 - How many parameters does each command need?
                 - What format should values be in? (0x1234 for hex, 0b1010 for binary, decimal, "string")
                 - What is the correct parameter order?
                 - Match parameter formats EXACTLY as shown in examples
             
             Look at the examples to understand:
-            - FIRST: How to use iSim commands (poll_signal, peek_signal, macro_map) - CHECK THESE FIRST
+            - FIRST: How to access registers dynamically (get_icl_instances, foreach_in_collection)
+            - SECOND: How to use iSim commands (poll_signal, peek_signal, macro_map)
             - How to define procedures (iProc)
-            - How to write registers (iWrite)
-            - How to read registers (iRead)
+            - How to write registers dynamically (iWrite $reg_name.field)
+            - How to read registers dynamically (iRead $reg_name.field)
             - How to apply operations (iApply)
             - How to add timing (iRunLoop)
             - How to call procedures (iCall)
@@ -751,6 +825,8 @@ class MyCustomPlugin(AgentPlugin):
             source $::env(DUVE_M_HOME)/verif/pdl/common/tap_utils.pdl
             
             [Rest of PDL code using ONLY commands from the examples above]
+            [PRIORITIZE dynamic register access using get_icl_instances + foreach_in_collection loops]
+            [ONLY hardcode register names if they are truly unique and non-repeating]
             [PRIORITIZE iSim commands where applicable]
             [Use iSim macro_map for any repeated or long signal paths - define mappings early]
             [Reference mapped signals with backtick prefix: `alias_name]
@@ -763,6 +839,9 @@ class MyCustomPlugin(AgentPlugin):
             [Use explicit prefixes: 0b for binary, 0x for hex, 0d for decimal]
             
             === IMPLEMENTATION NOTES ===
+            [FIRST: State whether dynamic register access was used and justify the approach]
+            [If dynamic: List the get_icl_instances and foreach_in_collection patterns used]
+            [If hardcoded: Explain why hardcoding was necessary for this specific case]
             [List which PDL commands you used and confirm they came from the examples]
             [If iSim commands used, list them and confirm parameters are complete and correct]
             [If iSim macro_map used, list the mappings created and why they were beneficial]
@@ -919,7 +998,7 @@ class MyCustomPlugin(AgentPlugin):
         if self.rag_kb:
             stats = self.rag_kb.get_stats()
             self.console.print(f"[green]✓ Knowledge base loaded: {stats['total_chunks']} chunks available[/green]")
-            self.console.print(f"[green]✓ example.pdl loaded in knowledge base[/green]\n")
+            # self.console.print(f"[green]✓ example.pdl loaded in knowledge base[/green]\n")
         else:
             self.console.print("[yellow]⚠ RAG knowledge base not available. Using legacy mode.[/yellow]\n")
         
@@ -1019,15 +1098,6 @@ class MyCustomPlugin(AgentPlugin):
   • Questions asked: {question_count}
   • Total tokens used: {total_tokens}
             """)
-            
-            # Save session history
-            try:
-                history_file = Path.cwd() / f"pdl_expert_session_{Path.cwd().name}.json"
-                with open(history_file, 'w', encoding='utf-8') as f:
-                    json.dump(session_history, f, indent=2)
-                self.console.print(f"[green]Session history saved to:[/green] [bold]{history_file}[/bold]")
-            except Exception as e:
-                self.console.print(f"[yellow]Could not save session history: {e}[/yellow]")
 
     def run_agent_flow(self, context, **kwargs):
         """

@@ -271,6 +271,18 @@ class MyCustomPlugin(AgentPlugin):
         - Do NOT confuse bit numbers with field names
         - Preserve the exact notation used in SPF (brackets for bits, dots for fields)
         
+        CRITICAL: SPF focus_tap to PDL instance lookup conversion:
+        - When SPF uses focus_tap followed by register access, convert to dynamic instance lookup
+        - Pattern: focus_tap DFX_<MODULE>_STAP; set <REGISTER>[bits] = value;
+        - Conversion steps:
+          1. Extract module name from focus_tap: Remove "DFX_" prefix and "_STAP" suffix
+          2. Lowercase the extracted module name
+          3. Use wildcard pattern in PDL: get_icl_instances -of_modules [get_icl_modules {*<lowercased_module>*pwell_wrapper*<REGISTER>}]
+        - Example:
+          SPF: focus_tap DFX_PARFUSE_STAP; set PGCB_DEBUG_OVR[32:1] = 'b01010101010101010101010101010101;
+          PDL: set fuse_reg [get_icl_instances -of_modules [get_icl_modules {*parfuse*pwell_wrapper*PGCB_DEBUG_OVR}]]
+        - This wildcard search pattern finds the correct register instance dynamically
+        
         CRITICAL: Extract exact value formats with proper prefixes:
         - Binary values: MUST have 0b prefix (e.g., 0b1010, 0b0, 0b111)
         - Hexadecimal values: MUST have 0x prefix (e.g., 0x1234, 0xABCD, 0x0)
@@ -486,6 +498,12 @@ class MyCustomPlugin(AgentPlugin):
            NOTE: These headers are required for PDL files only, not for SPF files
         8. Use iNote "description" liberally to document what PDL code is doing
            NOTE: iNote is a PDL command for documentation, not used in SPF
+        8a. CRITICAL - SPF focus_tap CONVERSION:
+           When users ask about converting SPF focus_tap to PDL:
+           - Explain the transformation: DFX_<MODULE>_STAP → lowercase module name
+           - Show wildcard pattern: {*<module>*pwell_wrapper*<REGISTER>}
+           - Always use get_icl_instances with get_icl_modules for dynamic lookup
+           - Example: focus_tap DFX_PARFUSE_STAP → {*parfuse*pwell_wrapper*<register>}
         9. CRITICAL BEST PRACTICE - PRIORITIZE DYNAMIC REGISTER ACCESS:
            When users ask about register access patterns, ALWAYS recommend the dynamic approach:
            - Use get_icl_instances to get register/module instances dynamically
@@ -494,6 +512,19 @@ class MyCustomPlugin(AgentPlugin):
            - Apply operations to $reg_name variable
            - This approach is STRONGLY PREFERRED over hardcoding individual register names
            - Benefits: Scalable, maintainable, works with multiple instances automatically
+           
+           CRITICAL - SPF focus_tap TO PDL CONVERSION PATTERN:
+           When converting SPF focus_tap statements to PDL:
+           - SPF Pattern: focus_tap DFX_<MODULE>_STAP; set <REGISTER>[bits] = value;
+           - Conversion Steps:
+             1. Extract module: Remove "DFX_" prefix and "_STAP" suffix from focus_tap name
+             2. Lowercase the module name
+             3. Use wildcard search: get_icl_modules {*<lowercased_module>*pwell_wrapper*<REGISTER>}
+             4. Get instances: set var [get_icl_instances -of_modules [get_icl_modules {...}]]
+           - Example:
+             SPF: focus_tap DFX_PARFUSE_STAP; set PGCB_DEBUG_OVR[32:1] = 'b01010101...;
+             PDL: set fuse_reg [get_icl_instances -of_modules [get_icl_modules {*parfuse*pwell_wrapper*PGCB_DEBUG_OVR}]]
+           - This wildcard pattern {*module*pwell_wrapper*register} dynamically finds the correct instance
            
            CORRECT (Dynamic - Always recommend this):
            ```pdl
@@ -734,11 +765,11 @@ class MyCustomPlugin(AgentPlugin):
             if 'register' in content_lower or 'reg' in content_lower:
                 search_terms.append('iWrite iRead iApply register')
             
-            # Always search for core PDL syntax
-            search_terms.append('iProc iWrite iRead iApply iCall iRunLoop iNote')
+            # Always search for core PDL syntax and dynamic patterns
+            search_terms.append('iProc iWrite iRead iApply iCall iRunLoop iNote get_icl_instances get_icl_modules')
             
-            # Build RAG query - PRIORITIZE iSim commands
-            rag_query = f"iSim poll_signal peek_signal macro_map DTEG simulation commands {' '.join(search_terms)} PDL syntax examples"
+            # Build RAG query - PRIORITIZE iSim commands and dynamic patterns
+            rag_query = f"iSim poll_signal peek_signal macro_map get_icl_instances get_icl_modules wildcard DTEG simulation commands {' '.join(search_terms)} PDL syntax examples"
             
             # Retrieve relevant PDL knowledge (example.pdl is now in RAG)
             self.console.print(f"  [dim]Retrieving PDL syntax examples from knowledge base...[/dim]")
@@ -784,11 +815,23 @@ class MyCustomPlugin(AgentPlugin):
             11. CRITICAL - PRIORITIZE DYNAMIC REGISTER ACCESS:
                 - BEFORE writing any iWrite/iRead commands, check if registers can be accessed dynamically
                 - If test operations show multiple registers from the same module, use get_icl_instances
+                - If test operations mention focus_tap, apply the focus_tap conversion pattern (see rule 12)
                 - Pattern: set reg_collection [get_icl_instances -of_modules [get_icl_module MODULE_NAME]]
                 - Then: foreach_in_collection reg $reg_collection {{{{ set reg_name [get_single_name $reg]; ... }}}}
                 - Only hardcode register names when dealing with truly unique, non-repeating registers
                 - Dynamic approach is ALWAYS preferred for scalability and maintainability
-            12. PRESERVE EXACT signal paths and register names - do NOT modify, rename, or shorten them
+            12. CRITICAL - SPF focus_tap CONVERSION PATTERN:
+                - When test operations mention "focus_tap DFX_<MODULE>_STAP" followed by register access:
+                  * Extract module name: Remove "DFX_" prefix and "_STAP" suffix from focus_tap
+                  * Lowercase the extracted module name
+                  * Use wildcard pattern: set <var> [get_icl_instances -of_modules [get_icl_modules {{*<lowercased_module>*pwell_wrapper*<REGISTER_NAME>}}]]
+                  * This creates a dynamic wildcard search to find the correct register instance
+                - Example conversion:
+                  SPF: focus_tap DFX_PARFUSE_STAP; set PGCB_DEBUG_OVR[32:1] = 'b01010101...
+                  PDL: set fuse_reg [get_icl_instances -of_modules [get_icl_modules {{*parfuse*pwell_wrapper*PGCB_DEBUG_OVR}}]]
+                       foreach_in_collection reg $fuse_reg {{ set reg_name [get_single_name $reg]; iWrite $reg_name 0b01010101...; iApply }}
+                - The wildcard pattern {{*module*pwell_wrapper*register}} ensures correct instance resolution
+            13. PRESERVE EXACT signal paths and register names - do NOT modify, rename, or shorten them
             13. Copy signal/register names character-for-character from the test operations description
             14. CRITICAL: Distinguish bit numbers from field names:
                 - If test operations show register[7] or register[15:8], that's BIT ACCESS, not a field

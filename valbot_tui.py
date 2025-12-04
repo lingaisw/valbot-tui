@@ -222,6 +222,9 @@ if IS_LINUX:
         'link': '⎘',
         'send': '⌲',
         'stop': '◼',
+        'database': '⛁',
+        'hourglass': '⌛',
+        'refresh': '⟳',
     }
 else:
     # Unicode emojis for Windows/Mac
@@ -244,6 +247,9 @@ else:
         'link': '🔗',
         'send': '⌲',
         'stop': '◼',
+        'database': '📊',
+        'hourglass': '⌛',
+        'refresh': '🔄',
     }
 
 
@@ -1949,7 +1955,7 @@ class DatabaseProgressWidget(Static):
     def __init__(self, total: int, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.total = total
-        self.border_title = "📊 Database Creation Progress"
+        self.border_title = f"{EMOJI['database']} Database Creation Progress"
         
     def compose(self) -> ComposeResult:
         """Compose the progress display."""
@@ -5750,7 +5756,7 @@ You can manually edit your configuration file at:
         self.app.call_from_thread(
             chat_panel.add_message,
             "system",
-            "🔄 Starting `/add_agent` command..."
+            f"{EMOJI['refresh']} Starting `/add_agent` command..."
         )
         
         try:
@@ -6034,7 +6040,7 @@ You can manually edit your configuration file at:
         self.app.call_from_thread(
             chat_panel.add_message,
             "system",
-            "🔄 Starting `/add_tool` command..."
+            f"{EMOJI['refresh']} Starting `/add_tool` command..."
         )
         
         try:
@@ -6986,7 +6992,7 @@ pip install {' '.join(missing)}
                 # Update status - starting file processing
                 if progress_widget:
                     def update_starting():
-                        progress_widget.update_progress(current_step, f"⏳ Starting: `{file_path.name}` ({idx}/{total_files})")
+                        progress_widget.update_progress(current_step, f"{EMOJI['hourglass']} Starting: `{file_path.name}` ({idx}/{total_files})")
                     self.app.call_from_thread(update_starting)
                 
                 try:
@@ -7051,7 +7057,7 @@ pip install {' '.join(missing)}
                             def update_ui():
                                 progress_widget.update_progress(
                                     current_step, 
-                                    f"⏳ {substep_desc}: `{file_path.name}` ({idx}/{total_files})"
+                                    f"{EMOJI['hourglass']} {substep_desc}: `{file_path.name}` ({idx}/{total_files})"
                                 )
                             self.app.call_from_thread(update_ui)
                         # Add a small delay to make progress visible
@@ -7450,7 +7456,7 @@ To unload all databases and return to normal chat, use `/new`.
                     self.app.call_from_thread(
                         chat_panel.add_message,
                         "system",
-                        f"📊 Retrieved {len(chunks)} chunks from `{Path(db_path).name}`"
+                        f"{EMOJI['database']} Retrieved {len(chunks)} chunks from `{Path(db_path).name}`"
                     )
                     
                 except Exception as e:
@@ -8666,10 +8672,10 @@ def main():
             
             # Check if we should restart
             if app.should_restart:
-                print("\n🔄 Restarting TUI...\n")
+                print(f"\n{EMOJI['refresh']} Restarting TUI...\n")
                 continue
             elif app.should_update:
-                print("\n🔄 Running updater in CLI mode...\n")
+                print(f"\n{EMOJI['refresh']} Running updater in CLI mode...\n")
                 # Run the CLI app.py with update command
                 import subprocess
                 subprocess.call([sys.executable, "app.py"])

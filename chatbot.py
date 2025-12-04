@@ -431,13 +431,20 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
             matches = re.findall(pattern, message)
             potential_paths.extend(matches)
         
-        # Check if any of these paths actually exist
+        # Check if any of these paths actually exist and normalize them
         valid_files = []
+        seen_paths = set()  # Track normalized paths to avoid duplicates
+        
         for path_str in potential_paths:
             try:
                 path = Path(path_str)
                 if path.exists() and path.is_file():
-                    valid_files.append(path_str)
+                    # Normalize path to absolute form for comparison
+                    normalized = str(path.resolve())
+                    if normalized not in seen_paths:
+                        seen_paths.add(normalized)
+                        # Keep original relative path format for display
+                        valid_files.append(str(path))
             except:
                 continue
         

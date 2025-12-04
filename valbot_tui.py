@@ -559,6 +559,10 @@ class RAGKnowledgeBase:
         """
         file_ext = file_path.suffix.lower()
         
+        # If file has no extension and path is valid, treat as normal text file
+        if not file_ext and file_path.is_file():
+            return True
+        
         # Check if file extension is in allowed list
         if file_ext not in allowed_extensions:
             self.console.print(f"[bold red]Error:[/bold red] File '{file_path.name}' is not supported by {method_name}.")
@@ -2264,7 +2268,7 @@ class FileExplorerPanel(Container):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.border_title = f"{EMOJI['folder']} Files"
+        self.border_title = f"{EMOJI['folder']} File Explorer"
         self.current_path = Path.cwd()  # Start with current working directory
         self.initial_path = Path.cwd()  # Store initial directory for reset
         self.history_back = []  # History for back navigation
@@ -3937,8 +3941,8 @@ class MainScreen(Screen):
             
             # Generate descriptive prefix from first message
             if first_message:
-                # Take first 20 characters, replace spaces with underscores, remove special chars
-                prefix = first_message[:20].replace(' ', '_')
+                # Take first 30 characters, replace spaces with underscores, remove special chars
+                prefix = first_message[:30].replace(' ', '_')
                 # Keep only alphanumeric and underscores
                 prefix = ''.join(c for c in prefix if c.isalnum() or c == '_')
                 # Remove consecutive underscores

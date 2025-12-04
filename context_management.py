@@ -87,6 +87,10 @@ class ContextManager:
             # .gz is allowed, will be decompressed transparently
             return True
         
+        # If file has no extension and path is valid, treat as normal text file
+        if not file_ext and os.path.isfile(file_path):
+            return True
+        
         # Check if file extension is in allowed list
         if file_ext not in allowed_extensions:
             self.console.print(f"[bold red]Error:[/bold red] File '{os.path.basename(file_path)}' has unsupported file type '{file_ext}'.")

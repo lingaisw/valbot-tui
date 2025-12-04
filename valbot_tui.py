@@ -3331,7 +3331,7 @@ class ContextChip(Container):
         elif self.item_type == 'folder':
             icon = EMOJI['folder']
         elif self.item_type == 'database':
-            icon = EMOJI['lightning']
+            icon = EMOJI['database']
         elif self.item_type == 'agent':
             icon = EMOJI['agent']
         else:

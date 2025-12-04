@@ -334,10 +334,7 @@ if [ \$VENV_FOUND -eq 1 ]; then
     echo "Activating virtual environment at \$FINAL_VENV_PATH..."
     source "\$FINAL_VENV_PATH/bin/activate"
 else
-    echo "Warning: Virtual environment not found in any of the following paths:"
-    for path in "\${VENV_PATHS[@]}"; do
-        echo "  - \$path"
-    done
+    echo "Warning: Virtual environment not found"
     echo "Running with system Python..."
 fi
 

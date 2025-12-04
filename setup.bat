@@ -188,10 +188,7 @@ echo if %%VENV_FOUND%%==1 ^(
 echo     echo Activating virtual environment at %%FINAL_VENV_PATH%%...
 echo     call "%%FINAL_VENV_PATH%%\Scripts\activate.bat"
 echo ^) else ^(
-echo     echo Warning: Virtual environment not found in any of the following paths:
-echo     for %%%%P in ^(%%VENV_PATHS%%^) do ^(
-echo         echo   - %%%%P
-echo     ^)
+echo     echo Warning: Virtual environment not found
 echo     echo Running with system Python...
 echo ^)
 echo.

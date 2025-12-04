@@ -85,6 +85,7 @@ import glob
 import gzip
 import json
 import shlex
+import traceback
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Iterable, Tuple
 from pathlib import Path
@@ -2044,8 +2045,16 @@ class ChatPanel(VerticalScroll):
         self._assistant_header_shown = False  # Track if assistant header shown after last user message
         self.current_agent: Optional[str] = None  # Track the currently active agent
     
-    def add_message(self, role: str, content: str, agent_name: Optional[str] = None):
-        """Add a new message to the chat."""
+    def add_message(self, role: str, content: str, agent_name: Optional[str] = None, raw_content: Optional[str] = None, skip_autosave: bool = False):
+        """Add a new message to the chat.
+        
+        Args:
+            role: Message role (user, assistant, system, error)
+            content: Formatted content for display
+            agent_name: Optional agent name
+            raw_content: Optional raw content for saving (without formatting). If not provided, content is used.
+            skip_autosave: If True, skip autosaving this message (used when loading history)
+        """
         # Reset header flag when user sends a message
         if role == "user":
             self._assistant_header_shown = False
@@ -2069,6 +2078,19 @@ class ChatPanel(VerticalScroll):
         if '```' in content:
             # Use delayed detection to ensure proper layout and positioning
             self.app.call_later(self._add_copy_buttons_to_message, msg)
+        
+        # Autosave assistant and user messages (skip system messages)
+        # Skip autosave if explicitly requested (e.g., when loading history)
+        if not skip_autosave:
+            # Get MainScreen to call autosave
+            try:
+                main_screen = self.app.screen
+                if hasattr(main_screen, '_autosave_message'):
+                    # Use raw_content for saving if provided, otherwise use content
+                    content_to_save = raw_content if raw_content is not None else content
+                    asyncio.create_task(main_screen._autosave_message(role, content_to_save, effective_agent_name))
+            except Exception:
+                pass  # Silently fail if autosave not available
     
     async def add_terminal_output(self, command: str):
         """Add a terminal output widget to the chat."""
@@ -2482,12 +2504,22 @@ class ChatHistoryTree(DirectoryTree):
         return super()._populate_node(node, content)
     
     def render_label(self, node: TreeNode[DirEntry], base_style: Style, style: Style) -> Text:
-        """Render tree label without .log extension."""
+        """Render tree label without .log extension and timestamp."""
         node_label = node._label.copy()
         # Remove .log extension from the label
         label_text = str(node_label.plain)
         if label_text.endswith('.log'):
             label_text = label_text[:-4]
+            
+            # Remove last two underscore-separated parts (date and time)
+            # Pattern: prefix_20241204_123045 -> prefix
+            parts = label_text.split('_')
+            if len(parts) > 2:
+                # Remove last 2 items
+                parts.pop()
+                parts.pop()
+                label_text = '_'.join(parts)
+            
             node_label = Text(label_text, style=node_label.style)
         
         node_label.stylize(style)
@@ -3839,6 +3871,10 @@ class MainScreen(Screen):
         self._cancel_agent = False  # Flag to cancel ongoing agent execution
         self._file_autocomplete_context = None  # Track file path autocomplete context
         
+        # Tool execution task tracking for cancellation
+        self._current_tool_task = None  # Current async task when using tools
+        self._current_tool_loop = None  # Current event loop for tool execution
+        
         # Chat history tracking
         self._current_session_file = None  # Path to current session log file
         self._session_start_time = None  # Timestamp when session started
@@ -3912,7 +3948,7 @@ class MainScreen(Screen):
                 prefix = prefix.strip('_')
                 # Ensure prefix is not empty
                 if prefix:
-                    filename = f"{prefix}.log"
+                    filename = f"{prefix}_{timestamp}.log"
                 else:
                     filename = f"chat_{timestamp}.log"
             else:
@@ -4708,6 +4744,11 @@ Please check your configuration and try again.
             # Check if we're actually streaming
             if self.processing:
                 self.app.notify(f"{EMOJI['cross']} Response cancelled.", severity="warning", timeout=2)
+                
+                # If using tool agent, cancel the async task
+                if hasattr(self, '_current_tool_task') and self._current_tool_task and not self._current_tool_task.done():
+                    # Cancel the task (this will raise CancelledError in the task)
+                    self._current_tool_task.cancel()
         
         # Priority 4: Cancel any ongoing agent execution
         if hasattr(self, '_agent_input_state') and self._agent_input_state:
@@ -4788,10 +4829,9 @@ Please check your configuration and try again.
                 
                 # Display user message immediately (without the /)
                 chat_panel = self.query_one("#chat-panel", ChatPanel)
-                chat_panel.add_message("user", formatted_message)
+                chat_panel.add_message("user", formatted_message, raw_content=message_to_send)
                 
-                # Autosave user message in the background (without # markers)
-                asyncio.create_task(self._autosave_message("user", message_to_send))
+                # Note: autosave is now handled in ChatPanel.add_message()
                 
                 # Send the message without slash to the chatbot (without double newlines or # markers) in background thread
                 import threading
@@ -4814,10 +4854,9 @@ Please check your configuration and try again.
             
             # Display user message immediately
             chat_panel = self.query_one("#chat-panel", ChatPanel)
-            chat_panel.add_message("user", formatted_message)
+            chat_panel.add_message("user", formatted_message, raw_content=message_to_send)
             
-            # Autosave user message in the background (without # markers)
-            asyncio.create_task(self._autosave_message("user", message_to_send))
+            # Note: autosave is now handled in ChatPanel.add_message()
             
             # Send the original message to the chatbot (without double newlines or # markers) in background thread
             import threading
@@ -4990,43 +5029,8 @@ Restarting TUI to reload configuration...
         elif cmd == "/new":
             # Display the user's command input in the chat with backtick formatting
             chat_panel.add_message("user", f"`{command}`")
-            # Override CLI's clear command to completely restart from scratch
-            chat_panel.clear_messages()
-            # Clear any streaming message reference
-            if hasattr(self, '_streaming_msg'):
-                self._streaming_msg = None
-            if hasattr(self, '_last_code_block_count'):
-                del self._last_code_block_count
-            
-            # Unload any active RAG database
-            if hasattr(self, '_active_rag_kb') and self._active_rag_kb is not None:
-                self._active_rag_kb = None
-            
-            # Clear context chip bar
-            try:
-                context_chip_bar = self.query_one("#context-chip-bar", ContextChipBar)
-                context_chip_bar.clear_all()
-            except Exception:
-                pass
-            
-            # Completely reinitialize the chatbot (like quitting and relaunching)
-            if self.chatbot:
-                # Clear conversation history
-                self.chatbot.clear_conversation()
-                
-                # Reinitialize system prompt (like during startup)
-                system_prompt = self.config_manager.get_setting(
-                    "chat_model_config.system_prompt", 
-                    "You are a helpful assistant. Prioritize markdown format and code blocks when applicable."
-                )
-                self.chatbot.context_manager.conversation_history.append({
-                    "role": "system", 
-                    "content": system_prompt
-                })
-                
-                # Reset conversation ID to start fresh backend session
-                self.chatbot._conversation_id = None
-            
+            # Use the proper action_new_chat method which handles all cleanup
+            await self.action_new_chat()
             chat_panel.add_message("system", f"{EMOJI['checkmark']} Started new chat.")
             return True
             
@@ -7700,10 +7704,12 @@ An error occurred while processing your message:
         try:
             if chat_panel.messages:
                 last_msg = chat_panel.messages[-1]
-                # Use the same delayed detection system as streaming
-                self.app.call_later(self._schedule_copy_button_detection, last_msg)
+                # Use ChatPanel's method for copy button detection
+                self.app.call_later(chat_panel._add_copy_buttons_to_message, last_msg)
         except Exception:
             pass  # Ignore errors
+        
+        # Note: autosave is now handled in ChatPanel.add_message()
     
     def _update_loading_message(self, content: str):
         """Update loading message content (called from worker thread)."""
@@ -7711,11 +7717,58 @@ An error occurred while processing your message:
             self._loading_msg.content = content
             self._loading_msg.refresh()
     
+    def _create_streaming_message(self, msg_ref: dict):
+        """Create a new streaming message widget (called from worker thread)."""
+        chat_panel = self.query_one("#chat-panel", ChatPanel)
+        
+        # Check if header should be shown
+        show_header = not chat_panel._assistant_header_shown
+        chat_panel._assistant_header_shown = True
+        
+        # Create message widget with initial content
+        streaming_msg = ChatMessage("assistant", msg_ref['content'], show_header=show_header)
+        chat_panel.mount(streaming_msg)
+        chat_panel.scroll_end(animate=False)  # Don't animate during streaming for better performance
+        
+        # Store reference
+        msg_ref['msg'] = streaming_msg
+    
+    def _update_streaming_message(self, msg_ref: dict):
+        """Update streaming message content (called from worker thread)."""
+        if msg_ref['msg'] and msg_ref['msg'].parent:
+            # Update the content using the proper update_content method
+            msg_ref['msg'].update_content(msg_ref['content'])
+            
+            # Scroll to show new content
+            chat_panel = self.query_one("#chat-panel", ChatPanel)
+            chat_panel.scroll_end(animate=False)
+    
+    def _finalize_streaming_message(self, msg_ref: dict):
+        """Finalize streaming message after completion (called from worker thread)."""
+        if msg_ref['msg'] and msg_ref['msg'].parent:
+            # Final refresh to ensure all content is displayed
+            msg_ref['msg'].update_content(msg_ref['content'])
+            
+            # Schedule copy button detection using the ChatPanel method
+            chat_panel = self.query_one("#chat-panel", ChatPanel)
+            self.app.call_later(chat_panel._add_copy_buttons_to_message, msg_ref['msg'])
+            
+            # Final scroll
+            chat_panel.scroll_end(animate=True)
+            
+            # Autosave the assistant message to the session log
+            try:
+                # Get agent name if available
+                agent_name = msg_ref.get('agent_name', None)
+                # Schedule autosave asynchronously
+                asyncio.create_task(self._autosave_message("assistant", msg_ref['content'], agent_name))
+            except Exception:
+                pass  # Ignore errors
+    
     def _send_with_tools(self, message: str):
-        """Send a message using the tool-enabled pydantic-ai agent."""
-        # Import ChatDeps from chatbot module
-        from chatbot import ChatDeps
+        """Send a message using the tool-enabled pydantic-ai agent with streaming."""
         import asyncio
+        import time
         
         # Check if tool agent is available
         if not hasattr(self.chatbot, 'tool_agent') or self.chatbot.tool_agent is None:
@@ -7723,60 +7776,93 @@ An error occurred while processing your message:
             self._send_standard_message_sync(message)
             return
         
-        # Add to conversation history
-        self.chatbot.context_manager.conversation_history.append({
-            "role": "user",
-            "content": message
-        })
-        
-        # Create deps with conversation history
-        deps = ChatDeps(
-            conversation_history=self.chatbot.context_manager.conversation_history
-        )
-        
         try:
-            # Show status
-            self.app.call_from_thread(self._update_loading_message, "🔧 Using tools to process your request...")
+            # Keep loading indicator until first chunk arrives
+            # (will be removed when first chunk triggers _create_streaming_message)
             
-            # Run the agent with tools in a new event loop for this thread
+            # Create a streaming message widget with thread-safe accumulation
+            streaming_msg_ref = {
+                'msg': None, 
+                'content': '', 
+                'first_chunk': True,
+                'last_update': 0,
+                'update_interval': 0.05,  # Batch updates every 50ms for smoother rendering
+                'cancelled': False  # Track if stream was cancelled
+            }
+            
+            def stream_callback(chunk: str, is_complete: bool):
+                """Callback for streaming updates from the agent."""
+                # Check for cancellation at the start
+                if self._cancel_streaming and not streaming_msg_ref['cancelled']:
+                    streaming_msg_ref['cancelled'] = True
+                    # Return True to signal cancellation to the chatbot
+                    return True
+                
+                if not is_complete:
+                    # Remove loading indicator on first chunk
+                    if streaming_msg_ref['first_chunk']:
+                        self.app.call_from_thread(self._remove_loading_message)
+                        streaming_msg_ref['first_chunk'] = False
+                    
+                    # Accumulate content (thread-safe since we're in the same thread)
+                    streaming_msg_ref['content'] += chunk
+                    
+                    # Batch updates to avoid overwhelming the UI with rapid chunks
+                    current_time = time.time()
+                    time_since_last = current_time - streaming_msg_ref['last_update']
+                    
+                    # Update or create message widget
+                    if streaming_msg_ref['msg'] is None:
+                        # Always create initial message immediately
+                        self.app.call_from_thread(self._create_streaming_message, streaming_msg_ref)
+                        streaming_msg_ref['last_update'] = current_time
+                    elif time_since_last >= streaming_msg_ref['update_interval']:
+                        # Throttle updates to improve performance
+                        self.app.call_from_thread(self._update_streaming_message, streaming_msg_ref)
+                        streaming_msg_ref['last_update'] = current_time
+                    # If throttled, content will still accumulate and show on next update or finalization
+                else:
+                    # Streaming complete - ensure final update with all accumulated content
+                    if streaming_msg_ref['msg'] is not None:
+                        # Force final update to ensure all content is shown
+                        self.app.call_from_thread(self._update_streaming_message, streaming_msg_ref)
+                        # Finalize immediately - the content is already accumulated
+                        self.app.call_from_thread(self._finalize_streaming_message, streaming_msg_ref)
+                    # Remove loading indicator if it's still there (e.g., if no chunks were received)
+                    self.app.call_from_thread(self._remove_loading_message)
+                
+                return False  # Continue streaming
+            
+            # Run the chatbot's send_message_with_tools method with streaming
             # Create a new event loop for this thread
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+            
+            # Store loop and task references for cancellation
+            self._current_tool_loop = loop
+            self._current_tool_task = None
+            
             try:
-                result = loop.run_until_complete(self.chatbot.tool_agent.run(message, deps=deps))
-            finally:
-                loop.close()
-            
-            # Remove loading indicator
-            self.app.call_from_thread(self._remove_loading_message)
-            
-            # Display which tools were used (if any)
-            if hasattr(result, 'all_messages'):
-                tool_calls = []
-                for msg in result.all_messages():
-                    if hasattr(msg, 'parts'):
-                        for part in msg.parts:
-                            if hasattr(part, 'tool_name'):
-                                tool_calls.append(part.tool_name)
+                # Create the task so we can cancel it
+                self._current_tool_task = loop.create_task(
+                    self.chatbot.send_message_with_tools(message, stream_callback=stream_callback)
+                )
+                # Run the task
+                loop.run_until_complete(self._current_tool_task)
                 
-                if tool_calls:
-                    # Remove duplicates while preserving order
-                    unique_tools = list(dict.fromkeys(tool_calls))
-                    tools_used = ", ".join([f"`{tool}`" for tool in unique_tools])
-                    # self.app.call_from_thread(
-                    #     self._add_system_message, 
-                    #     f"🔧 **Tools used:** {tools_used}"
-                    # )
-            
-            # Display the response - use .output instead of .data
-            response_text = str(result.output) if hasattr(result, 'output') else str(result)
-            self.app.call_from_thread(self._add_assistant_message, response_text)
-            
-            # Add to conversation history
-            self.chatbot.context_manager.conversation_history.append({
-                "role": "assistant",
-                "content": response_text
-            })
+                # Check if we were cancelled during execution
+                if streaming_msg_ref['cancelled']:
+                    # Handle cancellation cleanup
+                    self._handle_tool_cancellation(streaming_msg_ref)
+                    
+            except asyncio.CancelledError:
+                # Task was cancelled - handle cleanup
+                self._handle_tool_cancellation(streaming_msg_ref)
+            finally:
+                # Clean up references
+                self._current_tool_task = None
+                self._current_tool_loop = None
+                loop.close()
             
         except Exception as e:
             import traceback
@@ -7801,13 +7887,33 @@ Falling back to standard chat...
 """
             self.app.call_from_thread(self._add_system_message, error_msg)
             
-            # Remove the user message we added
+            # Remove the user message if it was added
             if self.chatbot.context_manager.conversation_history and \
-               self.chatbot.context_manager.conversation_history[-1]["role"] == "user":
+               self.chatbot.context_manager.conversation_history[-1]["role"] == "user" and \
+               self.chatbot.context_manager.conversation_history[-1]["content"] == message:
                 self.chatbot.context_manager.conversation_history.pop()
             
             # Fall back to standard message
             self._send_standard_message_sync(message)
+    
+    def _handle_tool_cancellation(self, streaming_msg_ref: dict):
+        """Handle cleanup when tool execution is cancelled."""
+        # Remove loading indicator if still present
+        if streaming_msg_ref['first_chunk']:
+            self.app.call_from_thread(self._remove_loading_message)
+        
+        # Finalize any partial content that was streamed
+        if streaming_msg_ref['msg'] is not None and streaming_msg_ref['content']:
+            self.app.call_from_thread(self._update_streaming_message, streaming_msg_ref)
+            self.app.call_from_thread(self._finalize_streaming_message, streaming_msg_ref)
+            # Add partial response to conversation history
+            self.chatbot.context_manager.conversation_history.append({
+                "role": "assistant",
+                "content": streaming_msg_ref['content']
+            })
+        
+        # Show cancellation message
+        self.app.call_from_thread(self._add_system_message, f"{EMOJI['cross']} *Response cancelled by user.*")
     
     def _send_standard_message_sync(self, message: str):
         """Send a message using standard OpenAI streaming (synchronous for worker thread)."""
@@ -8256,11 +8362,26 @@ Falling back to standard chat...
             command_input.focus()
     
     def _load_chat_history(self, history_file: Path) -> None:
-        """Load a chat history file and restore the conversation."""
+        """Load a chat history file and restore the conversation.
+        
+        This method handles loading history whether it's:
+        1. The first history being loaded (from fresh state)
+        2. Switching from one loaded history to another
+        
+        In both cases, it completely resets the session state and loads the new history.
+        """
         try:
             chat_panel = self.query_one("#chat-panel", ChatPanel)
             
-            # Read the log file
+            # STEP 1: Reset session state completely (important when switching between histories)
+            # This ensures we don't append to the wrong file or carry over old state
+            self._current_session_file = None
+            self._session_initialized = False
+            self._session_start_time = None
+            self._first_user_input = None
+            self._last_autosave_content = ""
+            
+            # STEP 2: Read and parse the log file
             with open(history_file, 'r', encoding='utf-8') as f:
                 content = f.read()
             
@@ -8310,61 +8431,83 @@ Falling back to standard chat...
                         'agent_name': agent_name
                     })
             
-            # Start a new chat (clears everything)
-            import asyncio
-            asyncio.create_task(self.action_new_chat())
+            # STEP 3: Clear the chat panel and UI state
+            chat_panel.clear_messages()
             
-            # Wait a moment for new chat to complete, then load messages
-            def load_messages():
-                # Clear the welcome message
-                chat_panel.clear_messages()
+            # Cancel any ongoing streaming
+            self._cancel_streaming = True
+            
+            # Clear any streaming message reference
+            if hasattr(self, '_streaming_msg'):
+                self._streaming_msg = None
+            
+            # Unload any active RAG databases
+            if hasattr(self, '_active_rag_kb') and self._active_rag_kb is not None:
+                self._active_rag_kb = None
+            
+            # Clear context chip bar
+            try:
+                context_chip_bar = self.query_one("#context-chip-bar", ContextChipBar)
+                context_chip_bar.clear_all()
+            except Exception:
+                pass
+            
+            # STEP 4: Completely reinitialize the chatbot conversation history
+            if self.chatbot:
+                # Clear conversation history
+                self.chatbot.clear_conversation()
                 
-                # Add all messages to chat panel
+                # Reinitialize system prompt (like during startup)
+                system_prompt = self.config_manager.get_setting(
+                    "chat_model_config.system_prompt", 
+                    "You are a helpful assistant. Prioritize markdown format and code blocks when applicable."
+                )
+                self.chatbot.context_manager.conversation_history.append({
+                    "role": "system", 
+                    "content": system_prompt
+                })
+                
+                # Add all loaded messages to conversation history
                 for msg in messages:
-                    chat_panel.add_message(
-                        role=msg['role'],
-                        content=msg['content'],
-                        agent_name=msg['agent_name']
-                    )
+                    self.chatbot.context_manager.conversation_history.append({
+                        'role': msg['role'],
+                        'content': msg['content']
+                    })
                 
-                # Also add to conversation history for context
-                if self.chatbot:
-                    # Clear existing history (keep only system prompt)
-                    system_prompt = None
-                    if self.chatbot.context_manager.conversation_history:
-                        for msg in self.chatbot.context_manager.conversation_history:
-                            if msg.get('role') == 'system':
-                                system_prompt = msg
-                                break
-                    
-                    # Reset to only system prompt
-                    self.chatbot.context_manager.conversation_history.clear()
-                    if system_prompt:
-                        self.chatbot.context_manager.conversation_history.append(system_prompt)
-                    
-                    # Add all messages to conversation history
-                    for msg in messages:
-                        self.chatbot.context_manager.conversation_history.append({
-                            'role': msg['role'],
-                            'content': msg['content']
-                        })
-                
-                # Set the current session file to the loaded history file
-                # so new messages continue in the same file
-                self._current_session_file = history_file
-                self._session_initialized = True
-                self._session_start_time = datetime.now()
-                self._first_user_input = None  # Already has messages, don't need to track first input
-                self._last_autosave_content = ""  # Reset tracking
-                
-                # Close the history panel
-                self.action_toggle_history()
-                
-                # Show success message
-                self.app.notify(f"✅ Loaded chat history: {history_file.stem}", severity="information", timeout=3)
+                # Reset conversation ID to start fresh backend session
+                self.chatbot._conversation_id = None
             
-            # Schedule loading after a short delay to let new_chat complete
-            self.set_timer(0.3, load_messages)
+            # STEP 5: Add all messages to chat panel for display
+            # IMPORTANT: Skip autosave to prevent creating duplicate history entries
+            for msg in messages:
+                chat_panel.add_message(
+                    role=msg['role'],
+                    content=msg['content'],
+                    agent_name=msg['agent_name'],
+                    skip_autosave=True  # Don't save historical messages again
+                )
+            
+            # STEP 6: CRITICAL - Set the current session file to the loaded history file
+            # This ensures new messages are appended to THIS specific history file
+            # Not to the previous one if switching histories, and not to a new file
+            self._current_session_file = history_file
+            self._session_initialized = True
+            self._session_start_time = datetime.now()
+            self._first_user_input = None  # Already has messages, don't need to track first input
+            self._last_autosave_content = ""  # Reset tracking
+            
+            # Close the history panel
+            self.action_toggle_history()
+            
+            # Show success message
+            self.app.notify(f"✅ Loaded chat history: {history_file.stem}", severity="information", timeout=3)
+            
+            # Auto-focus the text input area
+            try:
+                command_input = self.query_one("#command-input", CommandInput)
+                command_input.focus()
+            except Exception:
+                pass
             
         except Exception as e:
             # Show error message

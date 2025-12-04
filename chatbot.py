@@ -449,60 +449,123 @@ $$ |   $$ |$$$$$$\  $$ |$$ |  $$ | $$$$$$\ $$$$$$\         $$ /  \__|$$ |       
         
         return valid_files
     
-    async def send_message_with_tools(self, message: str):
-        """Send a message using the tool-enabled pydantic-ai agent."""
+    async def send_message_with_tools(self, message: str, stream_callback=None):
+        """Send a message using the tool-enabled pydantic-ai agent.
+        
+        Args:
+            message: The user's message
+            stream_callback: Optional callback function for streaming updates.
+                           Called with (chunk_text: str, is_complete: bool)
+        """
         if not self.agent_model or not self.tool_agent:
             self.console.print("[bold yellow]Agent model not available. Using standard chat.[/bold yellow]")
             self.send_message(message)
             return
             
-        self.console.print(Rule(f"[bold blue]Bot with Tools [/bold blue]", style="bright_blue"))
+        if not stream_callback:
+            self.console.print(Rule(f"[bold blue]Bot with Tools [/bold blue]", style="bright_blue"))
         
         try:
             # Add user message to conversation history first
             self.context_manager.conversation_history.append({"role": "user", "content": message})
             
-            # Create deps with conversation history
+            # Create deps with conversation history (for tool access if needed)
             deps = ChatDeps(conversation_history=self.context_manager.conversation_history)
             
-            # Run the agent with the user's message
-            self.console.print("[dim]Running agent with tools...[/dim]")
-            result = await self.tool_agent.run(message, deps=deps)
+            # Build complete message for the agent that includes conversation context
+            # We'll format recent history as part of the prompt itself
+            context_messages = self.context_manager.conversation_history[1:-1]  # Skip system and current message
+            
+            if not stream_callback:
+                # DEBUG: Show conversation history length
+                self.console.print(f"[dim]Total history messages: {len(self.context_manager.conversation_history)}[/dim]")
+                self.console.print(f"[dim]Context messages (excluding system/current): {len(context_messages)}[/dim]")
+            
+            # Build a context-aware message if there's history
+            if context_messages:
+                context_str = "\n\n## Previous Conversation Context:\n"
+                for msg in context_messages[-10:]:  # Last 10 messages for context
+                    role = "User" if msg["role"] == "user" else "Assistant"
+                    context_str += f"\n**{role}:** {msg['content'][:100]}...\n"  # Show first 100 chars
+                context_str += f"\n## Current Question:\n{message}"
+                full_message = context_str
+                if not stream_callback:
+                    self.console.print(f"[dim yellow]Including {len(context_messages[-10:])} previous messages as context[/dim yellow]")
+            else:
+                full_message = message
+                if not stream_callback:
+                    self.console.print(f"[dim]No previous context - first message in session[/dim]")
+            
+            # Run the agent with streaming
+            if not stream_callback:
+                self.console.print("[dim]Running agent with tools...[/dim]")
+            
+            response_text = ""
+            tool_calls = []
+            
+            # Use run_stream for streaming support
+            async with self.tool_agent.run_stream(full_message, deps=deps) as result:
+                # Stream the response chunks
+                async for chunk in result.stream_text(delta=True):
+                    response_text += chunk
+                    if stream_callback:
+                        # Send chunk to callback for TUI streaming display
+                        # Check if callback returns True (indicating cancellation)
+                        should_cancel = stream_callback(chunk, False)
+                        if should_cancel:
+                            # User cancelled - break out of streaming
+                            break
+                    else:
+                        # For CLI, print directly
+                        self.console.print(chunk, end="")
+                
+                # After streaming is complete, check for tool usage
+                if hasattr(result, 'all_messages'):
+                    for msg in result.all_messages():
+                        if hasattr(msg, 'parts'):
+                            for part in msg.parts:
+                                if hasattr(part, 'tool_name'):
+                                    tool_calls.append(part.tool_name)
+            
+            # Final callback to indicate completion
+            if stream_callback:
+                stream_callback("", True)
+            else:
+                self.console.print("")  # New line after streaming
             
             # Display which tools were used (if any)
-            if hasattr(result, 'all_messages'):
-                tool_calls = []
-                for msg in result.all_messages():
-                    if hasattr(msg, 'parts'):
-                        for part in msg.parts:
-                            if hasattr(part, 'tool_name'):
-                                tool_calls.append(part.tool_name)
-                
-                if tool_calls:
-                    # Remove duplicates while preserving order
-                    unique_tools = list(dict.fromkeys(tool_calls))
-                    tools_used = ", ".join([f"[cyan]{tool}[/cyan]" for tool in unique_tools])
-                    # self.console.print(f"[dim]🔧 Tools used: {tools_used}[/dim]\n")
-            
-            # Display the response - use .output instead of .data
-            response_text = str(result.output) if hasattr(result, 'output') else str(result)
-            self.console.print(Markdown(response_text))
+            if tool_calls and not stream_callback:
+                unique_tools = list(dict.fromkeys(tool_calls))
+                tools_used = ", ".join([f"[cyan]{tool}[/cyan]" for tool in unique_tools])
+                # self.console.print(f"[dim]🔧 Tools used: {tools_used}[/dim]\n")
             
             # Add assistant response to conversation history
             self.context_manager.conversation_history.append({"role": "assistant", "content": response_text})
             
         except Exception as e:
             import traceback
-            self.console.print(f"[bold red]Error using tools: {e}[/bold red]")
-            self.console.print(f"[dim]{traceback.format_exc()}[/dim]")
-            self.console.print("[bold yellow]Falling back to standard chat...[/bold yellow]")
+            error_msg = f"Error using tools: {e}"
+            if stream_callback:
+                stream_callback(f"\n\n**Error:** {error_msg}\n\nFalling back to standard chat...", True)
+            else:
+                self.console.print(f"[bold red]{error_msg}[/bold red]")
+                self.console.print(f"[dim]{traceback.format_exc()}[/dim]")
+                self.console.print("[bold yellow]Falling back to standard chat...[/bold yellow]")
+            
             # Remove the user message we added, since we'll add it again in send_message
             if self.context_manager.conversation_history and \
                self.context_manager.conversation_history[-1]["role"] == "user":
                 self.context_manager.conversation_history.pop()
-            self.send_message(message)
+            
+            # Fallback to standard message
+            if not stream_callback:
+                self.send_message(message)
+            else:
+                # For TUI, the fallback will be handled by the caller
+                raise
         
-        self.console.print(Rule(style="bright_blue"))
+        if not stream_callback:
+            self.console.print(Rule(style="bright_blue"))
 
     def send_message(self, message):
         self.context_manager.conversation_history.append({"role": "user", "content": message})

@@ -112,10 +112,10 @@ class MyCustomPlugin(AgentPlugin):
             console.print()
             
             mode_value = None
-            while mode_value not in ['1', '2']:
-                mode_value = console.input("[bold yellow]Select an option (1 or 2):[/bold yellow] ").strip()
-                if mode_value not in ['1', '2']:
-                    console.print("[red]Invalid selection. Please enter 1 or 2.[/red]")
+            while mode_value not in ['1', '2', '3']:
+                mode_value = console.input("[bold yellow]Select an option (1, 2, or 3):[/bold yellow] ").strip()
+                if mode_value not in ['1', '2', '3']:
+                    console.print("[red]Invalid selection. Please enter 1, 2, or 3.[/red]")
             
             selected_index = int(mode_value) - 1
         

@@ -437,11 +437,13 @@ main() {
         echo "alias valbot \"$bash_runner\""
       } >> "$aliases_file"
       ok "Alias successfully added to $aliases_file"
+      say "\nSourcing $aliases_file to activate the alias..."
+      # shellcheck disable=SC1090
+      source "$aliases_file" 2>/dev/null || warn "Could not source aliases file automatically. You may need to source it manually."
       say "\n${BOLD}Setup Complete!${NC}"
-      say "To start using the alias:"
-      say "  1. Open a new terminal, OR"
-      say "  2. Run: source \"$aliases_file\""
-      say "\nThen you can run 'valbot' from anywhere!"
+      say "The 'valbot' alias is now active in this terminal session."
+      say "For new terminal sessions, make sure $aliases_file is sourced in your shell config."
+      say "\nYou can now run 'valbot' from anywhere!"
     else
       warn "Alias setup cancelled."
       exit 0
@@ -453,13 +455,14 @@ main() {
         echo "alias valbot \"$bash_runner\""
       } > "$aliases_file"
       ok "Created $aliases_file and added alias"
+      say "\nSourcing $aliases_file to activate the alias..."
+      # shellcheck disable=SC1090
+      source "$aliases_file" 2>/dev/null || warn "Could not source aliases file automatically. You may need to source it manually."
       say "\n${BOLD}Setup Complete!${NC}"
-      say "To start using the alias:"
-      say "  1. Add this line to your ~/.bashrc or ~/.zshrc:"
+      say "The 'valbot' alias is now active in this terminal session."
+      say "\nIMPORTANT: Add this line to your ~/.bashrc or ~/.zshrc:"
       say "     source \"$aliases_file\""
-      say "  2. Open a new terminal, OR"
-      say "  3. Run: source \"$aliases_file\""
-      say "\nThen you can run 'valbot' from anywhere!"
+      say "\nThen the alias will work in all new terminal sessions. You can run 'valbot' from anywhere!"
     else
       warn "Alias setup cancelled."
       say "You can still create an alias manually in your shell configuration:"

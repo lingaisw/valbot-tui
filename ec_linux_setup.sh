@@ -308,15 +308,36 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Hardcoded virtual environment path from setup
-VENV_PATH="$VENV_PATH"
+# List of paths to check for virtual environment
+# You can manually add additional paths to this array
+VENV_PATHS=(
+    "$VENV_PATH"
+    "\$SCRIPT_DIR/venv"
+    "\$SCRIPT_DIR/valbot-venv"
+    "\$SCRIPT_DIR/.venv"
+)
 
-# Activate virtual environment if it exists
-if [ -f "\$VENV_PATH/bin/activate" ]; then
-    echo "Activating virtual environment at \$VENV_PATH..."
-    source "\$VENV_PATH/bin/activate"
+# Check for virtual environment in the listed paths
+VENV_FOUND=0
+FINAL_VENV_PATH=""
+
+for path in "\${VENV_PATHS[@]}"; do
+    if [ -f "\$path/bin/activate" ]; then
+        FINAL_VENV_PATH="\$path"
+        VENV_FOUND=1
+        break
+    fi
+done
+
+# Activate virtual environment if found
+if [ \$VENV_FOUND -eq 1 ]; then
+    echo "Activating virtual environment at \$FINAL_VENV_PATH..."
+    source "\$FINAL_VENV_PATH/bin/activate"
 else
-    echo "Warning: Virtual environment not found at \$VENV_PATH"
+    echo "Warning: Virtual environment not found in any of the following paths:"
+    for path in "\${VENV_PATHS[@]}"; do
+        echo "  - \$path"
+    done
     echo "Running with system Python..."
 fi
 
@@ -325,8 +346,8 @@ fi
 echo "Starting ValBot TUI in new terminal..."
 xfce4-terminal --command="bash -c '
     # Re-activate virtual environment in the new terminal
-    if [ -f \"\$VENV_PATH/bin/activate\" ]; then
-        source \"\$VENV_PATH/bin/activate\"
+    if [ \$VENV_FOUND -eq 1 ]; then
+        source \"\$FINAL_VENV_PATH/bin/activate\"
     fi
     
     # Launch the TUI

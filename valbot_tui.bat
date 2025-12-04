@@ -17,16 +17,20 @@ if errorlevel 1 (
 REM Get the directory where this script is located
 set SCRIPT_DIR=%~dp0
 
-REM Change to the script directory
-cd /d "%SCRIPT_DIR%"
+REM Don't change to script directory - stay in caller's directory
+REM cd /d "%SCRIPT_DIR%"
 
-REM Check for virtual environment in multiple locations
+REM List of paths to check for virtual environment
+REM You can manually add additional paths to this array (space-separated)
+set "VENV_PATHS=%SCRIPT_DIR%venv %SCRIPT_DIR%valbot-venv %SCRIPT_DIR%.venv"
+
+REM Check for virtual environment in the listed paths
 set VENV_FOUND=0
 set VENV_PATH=
 
-for %%V in (venv valbot-venv .venv) do (
-    if exist "%%V\Scripts\activate.bat" (
-        set "VENV_PATH=%%V"
+for %%P in (%VENV_PATHS%) do (
+    if exist "%%P\Scripts\activate.bat" (
+        set "VENV_PATH=%%P"
         set VENV_FOUND=1
         goto :venv_found
     )
@@ -37,13 +41,16 @@ if %VENV_FOUND%==1 (
     echo Activating virtual environment at %VENV_PATH%...
     call "%VENV_PATH%\Scripts\activate.bat"
 ) else (
-    echo Warning: Virtual environment not found in common locations ^(venv, valbot-venv, .venv^)
+    echo Warning: Virtual environment not found in any of the following paths:
+    for %%P in (%VENV_PATHS%) do (
+        echo   - %%P
+    )
     echo Running with system Python...
 )
 
 REM Launch the TUI
 echo Starting ValBot TUI...
-python valbot_tui_launcher.py %*
+python "%SCRIPT_DIR%valbot_tui_launcher.py" %*
 
 REM Deactivate virtual environment if it was activated
 if defined VIRTUAL_ENV (

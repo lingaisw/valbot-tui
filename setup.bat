@@ -167,15 +167,31 @@ echo.
 echo REM Don't change to script directory - stay in caller's directory
 echo REM cd /d "%%SCRIPT_DIR%%"
 echo.
-echo REM Hardcoded virtual environment path from setup
-echo set VENV_PATH=%VENV_PATH%
+echo REM List of paths to check for virtual environment
+echo REM You can manually add additional paths to this list ^(space-separated^)
+echo set "VENV_PATHS=%VENV_PATH% %%SCRIPT_DIR%%venv %%SCRIPT_DIR%%valbot-venv %%SCRIPT_DIR%%.venv"
 echo.
-echo REM Activate virtual environment if it exists
-echo if exist "%%VENV_PATH%%\Scripts\activate.bat" ^(
-echo     echo Activating virtual environment at %%VENV_PATH%%...
-echo     call "%%VENV_PATH%%\Scripts\activate.bat"
+echo REM Check for virtual environment in the listed paths
+echo set VENV_FOUND=0
+echo set FINAL_VENV_PATH=
+echo.
+echo for %%%%P in ^(%%VENV_PATHS%%^) do ^(
+echo     if exist "%%%%P\Scripts\activate.bat" ^(
+echo         set "FINAL_VENV_PATH=%%%%P"
+echo         set VENV_FOUND=1
+echo         goto :venv_found
+echo     ^)
+echo ^)
+echo.
+echo :venv_found
+echo if %%VENV_FOUND%%==1 ^(
+echo     echo Activating virtual environment at %%FINAL_VENV_PATH%%...
+echo     call "%%FINAL_VENV_PATH%%\Scripts\activate.bat"
 echo ^) else ^(
-echo     echo Warning: Virtual environment not found at %%VENV_PATH%%
+echo     echo Warning: Virtual environment not found in any of the following paths:
+echo     for %%%%P in ^(%%VENV_PATHS%%^) do ^(
+echo         echo   - %%%%P
+echo     ^)
 echo     echo Running with system Python...
 echo ^)
 echo.

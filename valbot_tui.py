@@ -6811,7 +6811,7 @@ You can manually edit your configuration file at:
                 self.app.call_from_thread(
                     chat_panel.add_message, 
                     "assistant", 
-                    f"✅ Agent **{agent_name}** completed successfully!"
+                    f"{EMOJI['checkmark']} Agent **{agent_name}** completed successfully!"
                 )
         except KeyboardInterrupt:
             # Agent was cancelled by user
@@ -8287,7 +8287,7 @@ Falling back to standard chat...
         async def handle_model_selection(selected_model):
             if selected_model:
                 chat_panel = self.query_one("#chat-panel", ChatPanel)
-                chat_panel.add_message("system", f"✅ Model changed to: **{selected_model}**\n\nUpdating chatbot...")
+                chat_panel.add_message("system", f"{EMOJI['checkmark']} Model changed to: **{selected_model}**\n\nUpdating chatbot...")
                 
                 # Update status bar and chatbot's model
                 status_bar = self.query_one("#status-bar", StatusBar)
@@ -8296,7 +8296,7 @@ Falling back to standard chat...
                 # Update the chatbot's model directly
                 if self.chatbot:
                     self.chatbot.modelname = selected_model
-                    chat_panel.add_message("system", f"✅ Now using model: **{selected_model}**")
+                    chat_panel.add_message("system", f"{EMOJI['checkmark']} Now using model: **{selected_model}**")
                 else:
                     chat_panel.add_message("error", f"{EMOJI['cross']} ChatBot not initialized.")
         
@@ -8504,7 +8504,7 @@ Falling back to standard chat...
             self.action_toggle_history()
             
             # Show success message
-            self.app.notify(f"✅ Loaded chat history: {history_file.stem}", severity="information", timeout=3)
+            self.app.notify(f"{EMOJI['checkmark']} Loaded chat history: {history_file.stem}", severity="information", timeout=3)
             
             # Auto-focus the text input area
             try:

@@ -3290,10 +3290,12 @@ class ContextChip(Container):
             icon = EMOJI['folder']
         elif self.item_type == 'database':
             icon = EMOJI['lightning']
+        elif self.item_type == 'agent':
+            icon = EMOJI['agent']
         else:
             icon = EMOJI['file']  # Default fallback
         
-        # Show basename for files, full name for databases
+        # Show basename for files, full name for databases/agents
         if self.item_type == 'file':
             display_name = os.path.basename(self.item_name)
         else:
@@ -3340,6 +3342,7 @@ class ContextChipBar(Container):
         super().__init__(*args, **kwargs)
         self.loaded_files = []
         self.loaded_databases = []  # Changed from single to list
+        self.active_agent = None  # Track currently active agent
     
     def add_file(self, file_path: str):
         """Add a file chip to the bar."""
@@ -3358,6 +3361,17 @@ class ContextChipBar(Container):
             self.mount(chip)
             self.add_class("visible")
     
+    def add_agent(self, agent_name: str):
+        """Add an agent chip to the bar."""
+        # Remove any existing agent chip first (only one agent at a time)
+        if self.active_agent:
+            self.remove_agent(self.active_agent)
+        
+        self.active_agent = agent_name
+        chip = ContextChip("agent", agent_name)
+        self.mount(chip)
+        self.add_class("visible")
+    
     def remove_file(self, file_path: str):
         """Remove a file chip from the bar."""
         if file_path in self.loaded_files:
@@ -3370,7 +3384,7 @@ class ContextChipBar(Container):
                 break
         
         # Hide the bar if no chips remain
-        if not self.loaded_files and not self.loaded_databases:
+        if not self.loaded_files and not self.loaded_databases and not self.active_agent:
             self.remove_class("visible")
     
     def remove_database(self, db_path: str):
@@ -3385,7 +3399,26 @@ class ContextChipBar(Container):
                 break
         
         # Hide the bar if no chips remain
-        if not self.loaded_files and not self.loaded_databases:
+        if not self.loaded_files and not self.loaded_databases and not self.active_agent:
+            self.remove_class("visible")
+    
+    def remove_agent(self, agent_name: str = None):
+        """Remove the agent chip from the bar."""
+        # If no agent_name specified, remove current active agent
+        if agent_name is None:
+            agent_name = self.active_agent
+        
+        if agent_name and agent_name == self.active_agent:
+            self.active_agent = None
+        
+        # Find and remove the chip widget
+        for chip in self.query(ContextChip):
+            if chip.item_type == "agent" and (agent_name is None or chip.item_name == agent_name):
+                chip.remove()
+                break
+        
+        # Hide the bar if no chips remain
+        if not self.loaded_files and not self.loaded_databases and not self.active_agent:
             self.remove_class("visible")
     
     def clear_all(self):
@@ -3393,6 +3426,7 @@ class ContextChipBar(Container):
         # Clear the lists
         self.loaded_files.clear()
         self.loaded_databases.clear()
+        self.active_agent = None
         
         # Remove all chip widgets
         for chip in list(self.query(ContextChip)):
@@ -3996,6 +4030,21 @@ class MainScreen(Screen):
             # Show notification
             chat_panel.add_message("system", 
                 f"{EMOJI['checkmark']} Unloaded database: `{message.item_name}`")
+        
+        elif message.item_type == "agent":
+            # Cancel the running agent
+            if hasattr(self, '_agent_input_state') and self._agent_input_state:
+                self._agent_input_state['cancelled'] = True
+                # Wake up any waiting prompts
+                if self._agent_input_state.get('waiting_for_input'):
+                    self._agent_input_state['ready'].set()
+            
+            # Remove from chip bar
+            self._context_chip_bar.remove_agent(message.item_name)
+            
+            # Show notification
+            chat_panel.add_message("system", 
+                f"{EMOJI['cross']} Cancelling agent: **{message.item_name}**")
         
         # Auto-focus the input text area after removing a context chip
         try:
@@ -6665,6 +6714,13 @@ You can manually edit your configuration file at:
         # Set the current agent in the chat panel
         self.app.call_from_thread(setattr, chat_panel, 'current_agent', agent_name)
         
+        # Add agent chip to context pill bar
+        try:
+            context_chip_bar = self.query_one("#context-chip-bar", ContextChipBar)
+            self.app.call_from_thread(context_chip_bar.add_agent, agent_name)
+        except Exception:
+            pass
+        
         # CRITICAL: Monkey-patch the SPF2PDL agent's get_initializer_args method
         # to completely bypass its interactive menu system
         original_spf2pdl_get_init = None
@@ -6778,6 +6834,13 @@ You can manually edit your configuration file at:
             
             # Clear the current agent in the chat panel
             self.app.call_from_thread(setattr, chat_panel, 'current_agent', None)
+            
+            # Remove agent chip from context pill bar
+            try:
+                context_chip_bar = self.query_one("#context-chip-bar", ContextChipBar)
+                self.app.call_from_thread(context_chip_bar.remove_agent)
+            except Exception:
+                pass
             
             # Clean up agent input state (but don't delete it - just reset)
             if hasattr(self, '_agent_input_state'):

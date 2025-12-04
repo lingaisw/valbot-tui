@@ -1516,13 +1516,30 @@ class ChatMessage(Container):
     @staticmethod
     def _has_rich_color_markup(content: str) -> bool:
         """
-        Check if content has Rich color markup tags.
-        Returns True if content has color tags that would benefit from RichLog rendering.
+        Check if content has Rich markup tags (colors, styles, etc.).
+        Returns True if content has Rich formatting tags that need to be converted.
         """
-        # Pattern to detect Rich color tags (including combined style+color like [bold green])
-        # Matches: [green], [bold green], [italic yellow], etc.
+        # Pattern to detect Rich markup tags:
+        # 1. Color tags: [green], [bold green], [#ff0000], etc.
+        # 2. Style tags: [bold], [italic], [dim], [underline], etc.
+        # 3. Closing tags: [/bold], [/], etc.
+        
+        # Check for color tags (with or without style prefix)
         color_pattern = r'\[(?:(?:bold|italic|dim|underline|strike|blink|reverse)\s+)?(?:red|green|blue|yellow|cyan|magenta|white|black|orange|purple|pink|deep_pink|grey\d+|#[0-9a-fA-F]{6}|rgb\([^\)]+\))'
-        return re.search(color_pattern, content, re.IGNORECASE) is not None
+        if re.search(color_pattern, content, re.IGNORECASE):
+            return True
+        
+        # Check for standalone style tags: [bold], [italic], [dim], [underline], [strike]
+        style_pattern = r'\[(?:bold|italic|dim|underline|strike|blink|reverse)\]'
+        if re.search(style_pattern, content, re.IGNORECASE):
+            return True
+        
+        # Check for closing tags: [/bold], [/italic], [/dim], [/]
+        closing_pattern = r'\[/(?:bold|italic|dim|underline|strike|blink|reverse)?\]'
+        if re.search(closing_pattern, content, re.IGNORECASE):
+            return True
+        
+        return False
     
     @staticmethod
     def _has_markdown_syntax(content: str) -> bool:
@@ -1664,13 +1681,14 @@ class ChatMessage(Container):
             has_markdown = self._has_markdown_syntax(content)
             
             # Decision logic:
-            # - If has markdown syntax (code blocks, headers, etc.) -> Use Markdown (convert Rich to markdown)
+            # - If has markdown syntax (code blocks, headers, etc.) -> Use Markdown (convert Rich to markdown if present)
             # - If has ONLY Rich colors with no markdown -> Use RichLog (preserve colors)
             # - Otherwise -> Use Markdown (safe default)
             if has_markdown or not has_rich_colors:
-                # Use Markdown widget - convert Rich markup to markdown
+                # Use Markdown widget - only convert Rich markup if it's actually present
                 self._widget_type = 'markdown'
-                content = self._convert_rich_markup_to_markdown(content)
+                if has_rich_colors:
+                    content = self._convert_rich_markup_to_markdown(content)
             else:
                 # Use RichLog widget - preserve Rich markup for color rendering
                 self._widget_type = 'richlog'
@@ -1705,7 +1723,8 @@ class ChatMessage(Container):
             
             if has_markdown or not has_rich_colors:
                 new_widget_type = 'markdown'
-                new_content = self._convert_rich_markup_to_markdown(new_content)
+                if has_rich_colors:
+                    new_content = self._convert_rich_markup_to_markdown(new_content)
             else:
                 new_widget_type = 'richlog'
                 # Keep Rich markup for RichLog

@@ -63,8 +63,7 @@ class MyCustomPlugin(AgentPlugin):
         # Menu choices
         choices = [
             ("1", "Convert SPF to PDL"),
-            ("2", "PDL Expert Consultation (interactive Q&A)"),
-            ("3", "Create/Update PDL Knowledge Base")
+            ("2", "PDL Expert Consultation (interactive Q&A)")
         ]
         
         selected_index = 0
@@ -98,7 +97,7 @@ class MyCustomPlugin(AgentPlugin):
                     live.update(render())
         except Exception as e:
             # Fallback to simple input if readchar doesn't work
-            console.print(f"[yellow]Arrow key navigation not available: {e}[/yellow]")
+            # console.print(f"[yellow]Arrow key navigation not available: {e}[/yellow]")
             console.print("\n[bold cyan]SPF to PDL Converter Agent[/bold cyan]")
             console.print("[dim]Select a mode to continue[/dim]\n")
             
@@ -112,10 +111,10 @@ class MyCustomPlugin(AgentPlugin):
             console.print()
             
             mode_value = None
-            while mode_value not in ['1', '2', '3']:
-                mode_value = console.input("[bold yellow]Select an option (1, 2, or 3):[/bold yellow] ").strip()
-                if mode_value not in ['1', '2', '3']:
-                    console.print("[red]Invalid selection. Please enter 1, 2, or 3.[/red]")
+            while mode_value not in ['1', '2']:
+                mode_value = console.input("[bold yellow]Select an option:[/bold yellow] ").strip()
+                if mode_value not in ['1', '2']:
+                    console.print("[red]Invalid selection. Please enter 1 or 2.[/red]")
             
             selected_index = int(mode_value) - 1
         
@@ -147,30 +146,18 @@ class MyCustomPlugin(AgentPlugin):
         resources_dir.mkdir(parents=True, exist_ok=True)
         
         try:
+            # Initialize RAG database (will load existing or create new)
+            # Note: Don't pass cache_dir - let it default to pdf_dir/.rag_cache
+            # Note: Use same collection name as valbot_tui.py for compatibility
             self.rag_kb = RAGKnowledgeBase(
                 pdf_dir=resources_dir,
-                cache_dir=resources_dir / ".rag_cache",
                 chunk_size=1000,
                 chunk_overlap=200,
-                collection_name="pdl_knowledge_base"
+                collection_name="rag_knowledge_base"
             )
             
-            # Check if database already exists
-            existing_count = self.rag_kb.collection.count()
-            
-            if existing_count == 0:
-                self.console.print("[yellow]⚠ PDL Knowledge Base is empty or not initialized.[/yellow]")
-                self.console.print("[dim]The knowledge base needs to be populated with PDL documentation and examples.[/dim]\n")
-                
-                # Don't automatically create in __init__ - let user choose via mode 3
-                self.console.print("[bold cyan]💡 Tip:[/bold cyan] Use option '3. Create/Update PDL Knowledge Base' to populate the database.\n")
-            else:
-                stats = self.rag_kb.get_stats()
-                self.console.print(f"[green]✓ Knowledge base loaded: {stats['total_chunks']} chunks from {stats['total_documents']} documents[/green]")
-            
         except Exception as e:
-            self.console.print(f"[yellow]⚠ RAG Knowledge Base initialization failed: {e}[/yellow]")
-            self.console.print("[dim]Will use legacy knowledge base as fallback[/dim]")
+            self.console.print(f"[yellow]⚠ RAG initialization failed: {e}[/yellow]")
             self.rag_kb = None
         
         # Create specialized agents for two-stage conversion
@@ -919,7 +906,6 @@ class MyCustomPlugin(AgentPlugin):
         The agent remembers previous questions and answers in the session.
         """
         from rich.markdown import Markdown
-        from rich.prompt import Confirm
         
         # Display header
         self.console.rule("[bold blue]PDL Expert Consultation Mode[/bold blue]", style="blue")
@@ -932,21 +918,10 @@ class MyCustomPlugin(AgentPlugin):
         # Check RAG knowledge base
         if self.rag_kb:
             stats = self.rag_kb.get_stats()
-            if stats['total_chunks'] == 0:
-                self.console.print("[yellow]⚠ PDL Knowledge Base is empty.[/yellow]")
-                if Confirm.ask("Would you like to create the database now?", default=True):
-                    return self.run_database_management_mode(context, **kwargs)
-                else:
-                    self.console.print("[dim]Continuing with limited knowledge...[/dim]\n")
-            else:
-                self.console.print(f"[green]✓ Knowledge base loaded: {stats['total_chunks']} chunks available[/green]")
-                self.console.print(f"[dim]Sources: {', '.join(stats['sources'][:5])}{'...' if len(stats['sources']) > 5 else ''}[/dim]\n")
+            self.console.print(f"[green]✓ Knowledge base loaded: {stats['total_chunks']} chunks available[/green]")
+            self.console.print(f"[green]✓ example.pdl loaded in knowledge base[/green]\n")
         else:
-            self.console.print("[yellow]⚠ RAG knowledge base not available.[/yellow]")
-            if Confirm.ask("Would you like to create the database now?", default=True):
-                return self.run_database_management_mode(context, **kwargs)
-            else:
-                self.console.print("[dim]Continuing with limited knowledge...[/dim]\n")
+            self.console.print("[yellow]⚠ RAG knowledge base not available. Using legacy mode.[/yellow]\n")
         
         # Interactive loop with conversation history
         session_history = []
@@ -1072,254 +1047,14 @@ class MyCustomPlugin(AgentPlugin):
         if mode == '2':
             # PDL Expert consultation mode
             return self.run_pdl_expert_mode(context, **kwargs)
-        elif mode == '3':
-            # Database Management Mode
-            return self.run_database_management_mode(context, **kwargs)
         else:
             # SPF to PDL conversion mode (default)
             return self.run_spf_conversion_mode(context, **kwargs)
-    
-    def run_database_management_mode(self, context, **kwargs):
-        """
-        Database management workflow - create or update the PDL knowledge base.
-        """
-        from rich.prompt import Confirm
-        from rich.table import Table
-        
-        # Display header
-        self.console.rule("[bold blue]PDL Knowledge Base Management[/bold blue]", style="blue")
-        
-        # Reinitialize RAG if needed
-        if self.rag_kb is None:
-            agent_dir = Path(__file__).parent
-            resources_dir = agent_dir / "pdl_agent_resources"
-            resources_dir.mkdir(parents=True, exist_ok=True)
-            
-            try:
-                self.rag_kb = RAGKnowledgeBase(
-                    pdf_dir=resources_dir,
-                    cache_dir=resources_dir / ".rag_cache",
-                    collection_name="pdl_knowledge_base"
-                )
-            except Exception as e:
-                self.console.print(f"[bold red]Error:[/bold red] Failed to initialize knowledge base: {e}")
-                return "Database initialization failed"
-        
-        # Show current database stats
-        stats = self.rag_kb.get_stats()
-        
-        table = Table(title="Current Database Status", show_header=True, header_style="bold cyan")
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", style="green")
-        
-        table.add_row("Total Documents", str(stats['total_documents']))
-        table.add_row("Total Chunks", str(stats['total_chunks']))
-        table.add_row("Sources", ", ".join(stats['sources']) if stats['sources'] else "None")
-        
-        self.console.print()
-        self.console.print(table)
-        self.console.print()
-        
-        # Ask user what they want to do
-        self.console.print("[bold cyan]Options:[/bold cyan]")
-        self.console.print("  1. Add PDF files to database")
-        self.console.print("  2. Add DOCX files to database")
-        self.console.print("  3. Add text files (.pdl, .spf, .txt, etc.) to database")
-        self.console.print("  4. Load default PDL documentation (from resources folder)")
-        self.console.print("  5. Clear and rebuild database")
-        self.console.print("  6. Exit\n")
-        
-        choice = self.console.input("[bold cyan]Select option (1-6):[/bold cyan] ").strip()
-        
-        if choice == '1':
-            # Add PDF files
-            self.console.print("\n[bold cyan]Add PDF Files[/bold cyan]")
-            self.console.print("[dim]Enter file paths (one per line). Press Enter on empty line when done.[/dim]")
-            
-            pdf_files = []
-            while True:
-                file_path = self.console.input("[cyan]PDF file path:[/cyan] ").strip()
-                if not file_path:
-                    break
-                if Path(file_path).exists():
-                    pdf_files.append(file_path)
-                    self.console.print(f"[green]✓ Added: {file_path}[/green]")
-                else:
-                    self.console.print(f"[yellow]⚠ File not found: {file_path}[/yellow]")
-            
-            if pdf_files:
-                force_reload = Confirm.ask("Force reload if already processed?", default=False)
-                self.rag_kb.load_pdfs(pdf_files, force_reload=force_reload)
-                self.console.print("[green]✓ PDF files processed successfully[/green]")
-            else:
-                self.console.print("[yellow]No files added[/yellow]")
-        
-        elif choice == '2':
-            # Add DOCX files
-            self.console.print("\n[bold cyan]Add DOCX Files[/bold cyan]")
-            self.console.print("[dim]Enter file paths (one per line). Press Enter on empty line when done.[/dim]")
-            
-            docx_files = []
-            while True:
-                file_path = self.console.input("[cyan]DOCX file path:[/cyan] ").strip()
-                if not file_path:
-                    break
-                if Path(file_path).exists():
-                    docx_files.append(file_path)
-                    self.console.print(f"[green]✓ Added: {file_path}[/green]")
-                else:
-                    self.console.print(f"[yellow]⚠ File not found: {file_path}[/yellow]")
-            
-            if docx_files:
-                force_reload = Confirm.ask("Force reload if already processed?", default=False)
-                self.rag_kb.load_docx_files(docx_files, force_reload=force_reload)
-                self.console.print("[green]✓ DOCX files processed successfully[/green]")
-            else:
-                self.console.print("[yellow]No files added[/yellow]")
-        
-        elif choice == '3':
-            # Add text files
-            self.console.print("\n[bold cyan]Add Text Files[/bold cyan]")
-            self.console.print("[dim]Enter file paths (one per line). Press Enter on empty line when done.[/dim]")
-            self.console.print("[dim]Supported: .pdl, .spf, .txt, .md, .py, .c, .cpp, .json, .xml, .log, etc.[/dim]\n")
-            
-            text_files = []
-            while True:
-                file_path = self.console.input("[cyan]Text file path:[/cyan] ").strip()
-                if not file_path:
-                    break
-                if Path(file_path).exists():
-                    text_files.append(file_path)
-                    self.console.print(f"[green]✓ Added: {file_path}[/green]")
-                else:
-                    self.console.print(f"[yellow]⚠ File not found: {file_path}[/yellow]")
-            
-            if text_files:
-                force_reload = Confirm.ask("Force reload if already processed?", default=False)
-                for text_file in text_files:
-                    file_path = Path(text_file)
-                    self.rag_kb.load_text_file(file_path, source_name=file_path.name, force_reload=force_reload)
-                self.console.print("[green]✓ Text files processed successfully[/green]")
-            else:
-                self.console.print("[yellow]No files added[/yellow]")
-        
-        elif choice == '4':
-            # Load default documentation
-            self.console.print("\n[bold cyan]Loading Default PDL Documentation[/bold cyan]")
-            
-            resources_dir = self.agent_dir / "pdl_agent_resources"
-            
-            # Default PDF files
-            pdf_files = [
-                "tessent_shell_reference_manual.pdf",
-                "tessent_cell_library_manual.pdf",
-                "DTEG_ITPP_Reader_Commands.pdf"
-            ]
-            
-            # Check which files exist
-            existing_pdfs = []
-            for pdf_file in pdf_files:
-                pdf_path = resources_dir / pdf_file
-                if pdf_path.exists():
-                    existing_pdfs.append(str(pdf_path))
-                else:
-                    self.console.print(f"[yellow]⚠ Not found: {pdf_file}[/yellow]")
-            
-            if existing_pdfs:
-                force_reload = Confirm.ask("Force reload if already processed?", default=False)
-                self.rag_kb.load_pdfs(existing_pdfs, force_reload=force_reload)
-            else:
-                self.console.print("[yellow]⚠ No default PDF files found in resources folder[/yellow]")
-            
-            # Load example PDL and SPF files
-            example_pdl = resources_dir / "example.pdl"
-            if example_pdl.exists():
-                force_reload = Confirm.ask("Force reload example.pdl if already processed?", default=False)
-                self.rag_kb.load_text_file(example_pdl, source_name="example.pdl", force_reload=force_reload)
-                self.console.print("[green]✓ Loaded example.pdl[/green]")
-            else:
-                self.console.print("[yellow]⚠ example.pdl not found[/yellow]")
-            
-            example_spf = resources_dir / "example.spf"
-            if example_spf.exists():
-                force_reload = Confirm.ask("Force reload example.spf if already processed?", default=False)
-                self.rag_kb.load_text_file(example_spf, source_name="example.spf", force_reload=force_reload)
-                self.console.print("[green]✓ Loaded example.spf[/green]")
-            else:
-                self.console.print("[yellow]⚠ example.spf not found[/yellow]")
-            
-            self.console.print("\n[green]✓ Default documentation loaded[/green]")
-        
-        elif choice == '5':
-            # Clear and rebuild
-            if Confirm.ask("[bold red]⚠ This will delete all existing database contents. Continue?[/bold red]", default=False):
-                self.console.print("\n[yellow]Clearing database...[/yellow]")
-                
-                # Delete the ChromaDB directory
-                chroma_path = self.agent_dir / "pdl_agent_resources" / ".rag_cache" / "chroma_db"
-                if chroma_path.exists():
-                    import shutil
-                    shutil.rmtree(chroma_path)
-                    self.console.print("[green]✓ Database cleared[/green]")
-                
-                # Clear processed docs cache
-                cache_file = self.agent_dir / "pdl_agent_resources" / ".rag_cache" / "processed_docs.json"
-                if cache_file.exists():
-                    cache_file.unlink()
-                
-                # Reinitialize
-                resources_dir = self.agent_dir / "pdl_agent_resources"
-                self.rag_kb = RAGKnowledgeBase(
-                    pdf_dir=resources_dir,
-                    cache_dir=resources_dir / ".rag_cache",
-                    collection_name="pdl_knowledge_base"
-                )
-                
-                self.console.print("[green]✓ Database reinitialized[/green]")
-                self.console.print("[dim]You can now add files to the database[/dim]")
-            else:
-                self.console.print("[yellow]Operation cancelled[/yellow]")
-        
-        elif choice == '6':
-            self.console.print("[dim]Exiting database management[/dim]")
-            return "Database management completed"
-        
-        else:
-            self.console.print("[yellow]Invalid option[/yellow]")
-        
-        # Show updated stats
-        self.console.print("\n[bold cyan]Updated Database Status:[/bold cyan]")
-        stats = self.rag_kb.get_stats()
-        
-        table = Table(show_header=True, header_style="bold cyan")
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", style="green")
-        
-        table.add_row("Total Documents", str(stats['total_documents']))
-        table.add_row("Total Chunks", str(stats['total_chunks']))
-        table.add_row("Sources", ", ".join(stats['sources']) if stats['sources'] else "None")
-        
-        self.console.print(table)
-        self.console.print()
-        
-        return "Database management completed successfully"
     
     def run_spf_conversion_mode(self, context, **kwargs):
         """
         SPF to PDL conversion workflow.
         """
-        from rich.prompt import Confirm
-        
-        # Check if database is available
-        if self.rag_kb is None or self.rag_kb.get_stats()['total_chunks'] == 0:
-            self.console.print("[yellow]⚠ PDL Knowledge Base is empty or not initialized.[/yellow]")
-            self.console.print("[dim]The knowledge base is needed for accurate PDL conversion.[/dim]\n")
-            
-            if Confirm.ask("Would you like to create/update the database now?", default=True):
-                return self.run_database_management_mode(context, **kwargs)
-            else:
-                self.console.print("[yellow]⚠ Warning: Proceeding without knowledge base may result in less accurate conversions.[/yellow]\n")
-        
         # Get input_path from initializer_args
         input_path = self.initializer_args.get('input_path')
         
@@ -1498,13 +1233,13 @@ class RAGKnowledgeBase:
             raise ImportError(error_msg)
     
     def _initialize_components(self):
-        """Initialize embedding model and vector database."""
+        """Initialize embedding model and vector database (load existing or create new)."""
         try:
             # Initialize ChromaDB first to check if we have existing data
             chroma_path = str(self.cache_dir / "chroma_db")
             self.chroma_client = chromadb.PersistentClient(path=chroma_path)
             
-            # Get or create collection
+            # Get or create collection (same as valbot_tui.py)
             self.collection = self.chroma_client.get_or_create_collection(
                 name=self.collection_name,
                 metadata={"hnsw:space": "cosine"}
@@ -1515,15 +1250,16 @@ class RAGKnowledgeBase:
             is_new = existing_count == 0
             
             if is_new:
-                self.console.print("[bold cyan]Initializing RAG Knowledge Base...[/bold cyan]")
+                self.console.print("[dim]Initializing new knowledge base...[/dim]")
+            else:
+                self.console.print(f"[dim]Found existing knowledge base with {existing_count} chunks[/dim]")
             
             # Load embedding model
             if is_new:
-                self.console.print(f"[yellow]Loading embedding model:[/yellow] {self.embedding_model_name}")
+                self.console.print("[dim]Loading embedding model (this may take a moment)...[/dim]")
             self.embedding_model = SentenceTransformer(self.embedding_model_name)
             if is_new:
-                self.console.print(f"  [green]✓[/green] Embedding model loaded")
-                self.console.print(f"  [green]✓[/green] Vector database initialized")
+                self.console.print("[green]✓ Embedding model loaded[/green]")
             
         except Exception as e:
             self.console.print(f"[red]Error initializing components: {e}[/red]")
@@ -1641,354 +1377,21 @@ class RAGKnowledgeBase:
     
     def load_text_file(self, file_path: Path, source_name: str = None, force_reload: bool = False):
         """
-        Load a text file (like .pdl) into the vector database.
-        
-        Args:
-            file_path: Path to the text file
-            source_name: Name to use for the source (defaults to filename)
-            force_reload: If True, reload even if already in database
+        Removed - database loading is disabled.
         """
-        if not file_path.exists():
-            self.console.print(f"[yellow]⚠[/yellow] File not found: {file_path}")
-            return
-        
-        source_name = source_name or file_path.name
-        
-        # Check if already processed
-        cache_file = self.cache_dir / "processed_docs.json"
-        processed_docs = {}
-        if cache_file.exists() and not force_reload:
-            with open(cache_file, 'r') as f:
-                processed_docs = json.load(f)
-            
-            # Check if file is already loaded
-            file_hash = self._get_pdf_hash(file_path)  # Reuse hash function
-            if source_name in processed_docs and processed_docs[source_name] == file_hash:
-                return  # Already loaded
-        
-        # Read text file
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                text = f.read()
-        except Exception as e:
-            self.console.print(f"[red]Error reading {file_path.name}: {e}[/red]")
-            return
-        
-        if not text:
-            return
-        
-        # Create chunks
-        file_hash = self._get_pdf_hash(file_path)
-        metadata = {
-            'source': source_name,
-            'doc_hash': file_hash,
-            'file_type': 'text'
-        }
-        chunks = self.chunk_text(text, metadata)
-        
-        if chunks:
-            # Generate embeddings and store
-            texts = [chunk['text'] for chunk in chunks]
-            embeddings = self.embedding_model.encode(texts, show_progress_bar=False)
-            
-            # Prepare for ChromaDB
-            ids = [f"{source_name}_{chunk['metadata']['chunk_id']}" for chunk in chunks]
-            metadatas = [chunk['metadata'] for chunk in chunks]
-            
-            # Add to collection
-            self.collection.add(
-                ids=ids,
-                embeddings=embeddings.tolist(),
-                documents=texts,
-                metadatas=metadatas
-            )
-            
-            # Update processed docs cache
-            processed_docs[source_name] = file_hash
-            with open(cache_file, 'w') as f:
-                json.dump(processed_docs, f, indent=2)
+        pass
     
     def load_pdfs(self, pdf_files: Optional[List[str]] = None, force_reload: bool = False):
         """
-        Load and process PDF files into the vector database.
-        
-        Args:
-            pdf_files: List of PDF filenames (searches in pdf_dir). If None, loads all PDFs.
-            force_reload: If True, reload even if already in database
+        Removed - database loading is disabled.
         """
-        # Check if knowledge base is already fully loaded
-        if not force_reload:
-            existing_count = self.collection.count()
-            cache_file = self.cache_dir / "processed_docs.json"
-            
-            if existing_count > 0 and cache_file.exists():
-                with open(cache_file, 'r') as f:
-                    processed_docs = json.load(f)
-                
-                # Check if we need to process the requested PDFs
-                if pdf_files is None:
-                    pdf_paths = list(self.pdf_dir.glob("*.pdf"))
-                else:
-                    pdf_paths = [self.pdf_dir / pdf for pdf in pdf_files]
-                
-                # Check if all requested PDFs are already processed
-                all_processed = True
-                for pdf_path in pdf_paths:
-                    if not pdf_path.exists():
-                        continue
-                    pdf_hash = self._get_pdf_hash(pdf_path)
-                    if pdf_path.name not in processed_docs or processed_docs[pdf_path.name] != pdf_hash:
-                        all_processed = False
-                        break
-                
-                if all_processed:
-                    self.console.print(f"[dim]RAG KB already loaded ({existing_count} chunks cached)[/dim]")
-                    return
-        
-        # Find PDF files
-        if pdf_files is None:
-            pdf_paths = list(self.pdf_dir.glob("*.pdf"))
-        else:
-            pdf_paths = [self.pdf_dir / pdf for pdf in pdf_files]
-        
-        if not pdf_paths:
-            self.console.print("[yellow]No PDF files found[/yellow]")
-            return
-        
-        self.console.print(f"\n[bold cyan]Loading {len(pdf_paths)} PDF(s) into RAG Knowledge Base[/bold cyan]")
-        
-        # Track processed documents
-        cache_file = self.cache_dir / "processed_docs.json"
-        processed_docs = {}
-        
-        if cache_file.exists() and not force_reload:
-            with open(cache_file, 'r') as f:
-                processed_docs = json.load(f)
-        
-        all_chunks = []
-        total_chunks = 0
-        
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            console=self.console
-        ) as progress:
-            
-            task = progress.add_task("[cyan]Processing PDFs...", total=len(pdf_paths))
-            
-            for pdf_path in pdf_paths:
-                if not pdf_path.exists():
-                    self.console.print(f"  [yellow]⚠[/yellow] File not found: {pdf_path.name}")
-                    progress.advance(task)
-                    continue
-                
-                # Check if already processed
-                pdf_hash = self._get_pdf_hash(pdf_path)
-                if pdf_path.name in processed_docs and processed_docs[pdf_path.name] == pdf_hash and not force_reload:
-                    self.console.print(f"  [dim]Skipping (cached): {pdf_path.name}[/dim]")
-                    progress.advance(task)
-                    continue
-                
-                # Extract text
-                progress.update(task, description=f"[cyan]Extracting: {pdf_path.name}")
-                text = self.extract_text_from_pdf(pdf_path)
-                
-                if not text:
-                    self.console.print(f"  [yellow]⚠[/yellow] No text extracted from {pdf_path.name}")
-                    progress.advance(task)
-                    continue
-                
-                # Create chunks
-                progress.update(task, description=f"[cyan]Chunking: {pdf_path.name}")
-                metadata = {
-                    'source': pdf_path.name,
-                    'doc_hash': pdf_hash
-                }
-                chunks = self.chunk_text(text, metadata)
-                
-                self.console.print(f"  [green]✓[/green] {pdf_path.name}: {len(chunks)} chunks ({len(text):,} chars)")
-                
-                all_chunks.extend(chunks)
-                total_chunks += len(chunks)
-                processed_docs[pdf_path.name] = pdf_hash
-                
-                progress.advance(task)
-        
-        # Generate embeddings and store in ChromaDB
-        if all_chunks:
-            self.console.print(f"\n[yellow]Generating embeddings for {total_chunks} chunks...[/yellow]")
-            
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                console=self.console
-            ) as progress:
-                
-                task = progress.add_task("[cyan]Computing embeddings...", total=total_chunks)
-                
-                # Process in batches for efficiency
-                batch_size = 100
-                for i in range(0, len(all_chunks), batch_size):
-                    batch = all_chunks[i:i + batch_size]
-                    texts = [chunk['text'] for chunk in batch]
-                    
-                    # Generate embeddings
-                    embeddings = self.embedding_model.encode(texts, show_progress_bar=False)
-                    
-                    # Prepare for ChromaDB
-                    ids = [f"{chunk['metadata']['source']}_{chunk['metadata']['chunk_id']}" for chunk in batch]
-                    metadatas = [chunk['metadata'] for chunk in batch]
-                    
-                    # Add to collection
-                    self.collection.add(
-                        ids=ids,
-                        embeddings=embeddings.tolist(),
-                        documents=texts,
-                        metadatas=metadatas
-                    )
-                    
-                    progress.advance(task, advance=len(batch))
-            
-            # Save processed documents cache
-            with open(cache_file, 'w') as f:
-                json.dump(processed_docs, f, indent=2)
-            
-            self.console.print(f"[green]✓ Successfully loaded {total_chunks} chunks into vector database[/green]")
-        else:
-            self.console.print("[yellow]No chunks to process[/yellow]")
+        pass
     
     def load_docx_files(self, docx_files: Optional[List[str]] = None, force_reload: bool = False):
         """
-        Load and process .docx files into the vector database.
-        
-        Args:
-            docx_files: List of .docx filenames (searches in pdf_dir). If None, loads all .docx files.
-            force_reload: If True, reload even if already in database
+        Removed - database loading is disabled.
         """
-        if Document is None:
-            self.console.print(f"[yellow]⚠ python-docx not installed. Skipping .docx files. Install with: pip install python-docx[/yellow]")
-            return
-        
-        # Find .docx files
-        if docx_files is None:
-            docx_paths = list(self.pdf_dir.glob("*.docx"))
-        else:
-            docx_paths = [self.pdf_dir / docx for docx in docx_files]
-        
-        if not docx_paths:
-            self.console.print("[yellow]No .docx files found[/yellow]")
-            return
-        
-        self.console.print(f"\n[bold cyan]Loading {len(docx_paths)} .docx file(s) into RAG Knowledge Base[/bold cyan]")
-        
-        # Track processed documents
-        cache_file = self.cache_dir / "processed_docs.json"
-        processed_docs = {}
-        
-        if cache_file.exists() and not force_reload:
-            with open(cache_file, 'r') as f:
-                processed_docs = json.load(f)
-        
-        all_chunks = []
-        total_chunks = 0
-        
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            console=self.console
-        ) as progress:
-            
-            task = progress.add_task("[cyan]Processing .docx files...", total=len(docx_paths))
-            
-            for docx_path in docx_paths:
-                if not docx_path.exists():
-                    self.console.print(f"  [yellow]⚠[/yellow] File not found: {docx_path.name}")
-                    progress.advance(task)
-                    continue
-                
-                # Check if already processed
-                docx_hash = self._get_pdf_hash(docx_path)  # Reuse hash function
-                if docx_path.name in processed_docs and processed_docs[docx_path.name] == docx_hash and not force_reload:
-                    self.console.print(f"  [dim]Skipping (cached): {docx_path.name}[/dim]")
-                    progress.advance(task)
-                    continue
-                
-                # Extract text
-                progress.update(task, description=f"[cyan]Extracting: {docx_path.name}")
-                text = self.extract_text_from_docx(docx_path)
-                
-                if not text:
-                    self.console.print(f"  [yellow]⚠[/yellow] No text extracted from {docx_path.name}")
-                    progress.advance(task)
-                    continue
-                
-                # Create chunks
-                progress.update(task, description=f"[cyan]Chunking: {docx_path.name}")
-                metadata = {
-                    'source': docx_path.name,
-                    'doc_hash': docx_hash,
-                    'file_type': 'docx'
-                }
-                chunks = self.chunk_text(text, metadata)
-                
-                self.console.print(f"  [green]✓[/green] {docx_path.name}: {len(chunks)} chunks ({len(text):,} chars)")
-                
-                all_chunks.extend(chunks)
-                total_chunks += len(chunks)
-                processed_docs[docx_path.name] = docx_hash
-                
-                progress.advance(task)
-        
-        # Generate embeddings and store in ChromaDB
-        if all_chunks:
-            self.console.print(f"\n[yellow]Generating embeddings for {total_chunks} chunks...[/yellow]")
-            
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                console=self.console
-            ) as progress:
-                
-                task = progress.add_task("[cyan]Computing embeddings...", total=total_chunks)
-                
-                # Process in batches for efficiency
-                batch_size = 100
-                for i in range(0, len(all_chunks), batch_size):
-                    batch = all_chunks[i:i + batch_size]
-                    texts = [chunk['text'] for chunk in batch]
-                    
-                    # Generate embeddings
-                    embeddings = self.embedding_model.encode(texts, show_progress_bar=False)
-                    
-                    # Prepare for ChromaDB
-                    ids = [f"{chunk['metadata']['source']}_{chunk['metadata']['chunk_id']}" for chunk in batch]
-                    metadatas = [chunk['metadata'] for chunk in batch]
-                    
-                    # Add to collection
-                    self.collection.add(
-                        ids=ids,
-                        embeddings=embeddings.tolist(),
-                        documents=texts,
-                        metadatas=metadatas
-                    )
-                    
-                    progress.advance(task, advance=len(batch))
-            
-            # Save processed documents cache
-            with open(cache_file, 'w') as f:
-                json.dump(processed_docs, f, indent=2)
-            
-            self.console.print(f"[green]✓ Successfully loaded {total_chunks} chunks from .docx files into vector database[/green]")
-        else:
-            self.console.print("[yellow]No chunks to process[/yellow]")
+        pass
     
     def retrieve_relevant_context(
         self, 
@@ -2108,7 +1511,12 @@ class RAGKnowledgeBase:
     
     def get_stats(self) -> Dict[str, Any]:
         """Get statistics about the knowledge base."""
-        count = self.collection.count()
+        count = 0
+        if self.collection:
+            try:
+                count = self.collection.count()
+            except:
+                count = 0
         
         return {
             "total_chunks": count,

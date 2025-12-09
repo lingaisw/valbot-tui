@@ -22,7 +22,6 @@ from rich.prompt import Confirm
 from rich import box
 from rich.table import Table
 from rich.live import Live
-from rich.panel import Panel
 import readchar
 import sys
 from prompt_toolkit import prompt
@@ -69,12 +68,12 @@ class MyCustomPlugin(AgentPlugin):
         
         console = Console()
         
-        # Menu choices - reordered with new ITPP option and PDL generation
+        # Menu choices - reordered with Generate PDL as option 2
         choices = [
             ("1", "PDL Expert Consultation (interactive Q&A)"),
-            ("2", "Convert SPF to PDL"),
-            ("3", "Convert ITPP to PDL"),
-            ("4", "PDL Generation from Requirements")
+            ("2", "Generate PDL"),
+            ("3", "Convert SPF to PDL"),
+            ("4", "Convert ITPP to PDL")
         ]
         
         selected_index = 0
@@ -123,7 +122,7 @@ class MyCustomPlugin(AgentPlugin):
             
             mode_value = None
             while mode_value not in ['1', '2', '3', '4']:
-                mode_value = console.input("[bold yellow]Select an option (1, 2, 3, or 4):[/bold yellow] ").strip()
+                mode_value = console.input("**Select an option (1, 2, 3, or 4):** ").strip()
                 if mode_value not in ['1', '2', '3', '4']:
                     console.print("[red]Invalid selection. Please enter 1, 2, 3, or 4.[/red]")
             
@@ -132,26 +131,13 @@ class MyCustomPlugin(AgentPlugin):
         mode_value = choices[selected_index][0]
         console.print(f"\n[green]✓ Selected:[/green] {choices[selected_index][1]}\n")
         
-        # Ask for input_path if mode is 2 (SPF) or 3 (ITPP)
+        # Ask for specific inputs based on mode
         if mode_value == '2':
+            # Generate PDL mode
             console.print()
-            input_path = console.input("[bold yellow]Enter the path to an SPF file or directory:[/bold yellow] ").strip()
-            return {
-                'mode': mode_value,
-                'input_path': input_path
-            }
-        elif mode_value == '3':
-            console.print()
-            input_path = console.input("[bold yellow]Enter the path to an ITPP file or directory:[/bold yellow] ").strip()
-            return {
-                'mode': mode_value,
-                'input_path': input_path
-            }
-        elif mode_value == '4':
-            console.print()
-            console.print("[bold cyan]PDL Generation from Requirements[/bold cyan]")
+            console.print("[bold cyan]Generate PDL[/bold cyan]")
             console.print("[dim]Example: /nfs/site/disks/.../pchlp/ub/[/dim]\n")
-            ub_directory = console.input("[bold yellow]Enter the UB directory path for ICL files:[/bold yellow] ").strip()
+            ub_directory = console.input("**Enter the UB directory path for ICL files:** ").strip()
             
             # Immediately find and list ICL files
             console.print()
@@ -164,12 +150,28 @@ class MyCustomPlugin(AgentPlugin):
             # Now ask for test description
             console.print()
             console.print("[dim]Describe what the PDL test sequence should do...[/dim]")
-            test_description = console.input("[bold yellow]Describe PDL test sequence:[/bold yellow] ").strip()
+            test_description = console.input("**Describe PDL test sequence:** ").strip()
             return {
                 'mode': mode_value,
                 'ub_directory': ub_directory,
                 'test_description': test_description,
                 'icl_files': icl_files  # Pass found ICL files
+            }
+        elif mode_value == '3':
+            # SPF to PDL conversion mode
+            console.print()
+            input_path = console.input("**Enter the path to an SPF file or directory:** ").strip()
+            return {
+                'mode': mode_value,
+                'input_path': input_path
+            }
+        elif mode_value == '4':
+            # ITPP to PDL conversion mode
+            console.print()
+            input_path = console.input("**Enter the path to an ITPP file or directory:** ").strip()
+            return {
+                'mode': mode_value,
+                'input_path': input_path
             }
         else:
             return {'mode': mode_value}
@@ -364,7 +366,7 @@ class MyCustomPlugin(AgentPlugin):
         )
     
     def create_pdl_generation_agent(self, model):
-        """Create an agent specialized in generating PDL from requirements."""
+        """Create an agent specialized in generating PDL."""
         system_prompt = """
         You are an expert in Tessent Procedural Description Language (PDL).
         
@@ -1537,7 +1539,7 @@ class MyCustomPlugin(AgentPlugin):
             Dictionary containing generation results
         """
         try:
-            self.console.print(f"\n[cyan]Stage 1:[/cyan] Analyzing ICL files and requirements...")
+            self.console.print(f"\n[cyan]Stage 1a:[/cyan] Analyzing ICL files and requirements...")
             
             # Read ICL files to understand available modules and registers
             icl_context = []
@@ -1586,7 +1588,7 @@ Registers: {', '.join(icl_data.get('registers', [])[:20])}
             # ====================================================================
             # STAGE 2: GENERATE PDL CODE
             # ====================================================================
-            self.console.print(f"\n[cyan]Stage 2:[/cyan] Generating PDL code...")
+            self.console.print(f"\n[cyan]Stage 1b:[/cyan] Generating PDL code...")
             
             # Build RAG query focusing on PDL best practices
             rag_query = "PDL iProc iWrite iRead iApply get_icl_instances get_icl_modules foreach_in_collection iSim macro_map dynamic register access best practices"
@@ -1730,7 +1732,7 @@ Registers: {', '.join(icl_data.get('registers', [])[:20])}
     
     def run_pdl_generation_mode(self, context, **kwargs):
         """
-        PDL generation from requirements and ICL files workflow.
+        PDL generation and ICL files workflow.
         """
         # Get parameters from initializer_args
         ub_directory = self.initializer_args.get('ub_directory')
@@ -1763,13 +1765,13 @@ Registers: {', '.join(icl_data.get('registers', [])[:20])}
                 return
         
         # Display header
-        self.console.rule("[bold blue]PDL Generation from Requirements[/bold blue]", style="blue")
+        self.console.rule("[bold blue]PDL Generation[/bold blue]", style="blue")
         self.console.print(f"\n[bold cyan]UB Directory:[/bold cyan] {ub_directory}")
         self.console.print(f"[bold cyan]Test Requirements:[/bold cyan] {test_description}")
         self.console.print(f"[bold cyan]ICL Files:[/bold cyan] {len(icl_files)} partition(s)\n")
         
         # Stage 1: Generate PDL
-        self.console.print(f"[bold yellow]STAGE 1: Generating PDL from Requirements[/bold yellow]", justify="center")
+        self.console.print(f"[bold yellow]STAGE 1: Generating PDL[/bold yellow]", justify="center")
         
         result = self.generate_pdl_from_requirements(test_description, icl_files)
         
@@ -1794,7 +1796,7 @@ Registers: {', '.join(icl_data.get('registers', [])[:20])}
             
             # Ask user for changes
             console.print()
-            user_changes = console.input("[bold yellow]Describe any changes needed (or press Enter to proceed with saving):[/bold yellow] ").strip()
+            user_changes = console.input("**Describe any changes needed (or press Enter to proceed with saving):** ").strip()
             
             if not user_changes:
                 # User is satisfied, break the loop
@@ -1880,7 +1882,7 @@ Registers: {', '.join(icl_data.get('registers', [])[:20])}
         from rich.console import Console
         console = Console()
         console.print()
-        output_filename = console.input("[bold yellow]Enter output filename (default: generated_test.pdl):[/bold yellow] ").strip()
+        output_filename = console.input("**Enter output filename (default: generated_test.pdl):** ").strip()
         if not output_filename:
             output_filename = "generated_test.pdl"
         elif not output_filename.endswith('.pdl'):
@@ -1906,10 +1908,10 @@ Registers: {', '.join(icl_data.get('registers', [])[:20])}
   • Output file: {output_filename}
         """, justify="center")
         
-        # Display implementation notes
-        if result.get('implementation_notes'):
-            self.console.print("\n[bold cyan]Implementation Notes:[/bold cyan]")
-            self.console.print(Panel(result['implementation_notes'], border_style="cyan"))
+        # # Display implementation notes
+        # if result.get('implementation_notes'):
+        #     self.console.print("\n[bold cyan]Implementation Notes:[/bold cyan]")
+        #     self.console.print(result['implementation_notes'])
 
     def run_pdl_expert_mode(self, context, **kwargs):
         """
@@ -2051,14 +2053,14 @@ Registers: {', '.join(icl_data.get('registers', [])[:20])}
             # PDL Expert consultation mode
             return self.run_pdl_expert_mode(context, **kwargs)
         elif mode == '2':
+            # PDL generation mode
+            return self.run_pdl_generation_mode(context, **kwargs)
+        elif mode == '3':
             # SPF to PDL conversion mode
             return self.run_spf_conversion_mode(context, **kwargs)
-        elif mode == '3':
+        elif mode == '4':
             # ITPP to PDL conversion mode
             return self.run_itpp_conversion_mode(context, **kwargs)
-        elif mode == '4':
-            # PDL generation from requirements mode
-            return self.run_pdl_generation_mode(context, **kwargs)
         else:
             self.console.print(f"[red]Error: Unknown mode '{mode}'[/red]")
             return

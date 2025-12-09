@@ -4828,8 +4828,11 @@ Please check your configuration and try again.
             display_msg = message if message else ""
             chat_panel.add_message("user", display_msg)
             
-            # Provide the response to the agent (can be empty string)
-            self._agent_input_state['result'] = message
+            # Strip file markers from agent input (convert #filepath to ./filepath or keep /filepath as-is)
+            processed_message = self._strip_file_markers(message) if message else ""
+            
+            # Provide the processed response to the agent (can be empty string)
+            self._agent_input_state['result'] = processed_message
             self._agent_input_state['waiting_for_input'] = False  # Reset the flag
             self._agent_input_state['ready'].set()
             return
@@ -4902,16 +4905,43 @@ Please check your configuration and try again.
         The # prefix is used in the TUI for file autocomplete suggestions,
         but needs to be removed before processing actual file paths.
         
+        Only processes paths that actually exist on the filesystem.
+        For relative paths (not starting with /), prepends ./ (or .\ on Windows).
+        For absolute paths (starting with /), keeps the path as-is.
+        Invalid paths keep the # marker unchanged.
+        
         Args:
             command: The command string that may contain #file paths
             
         Returns:
-            Command string with # markers removed from file paths
+            Command string with # markers removed from valid file paths
         """
         import re
-        # Replace #filepath patterns with filepath (preserving spaces)
+        from pathlib import Path
+        
+        def replace_file_marker(match):
+            filepath = match.group(1)
+            
+            # Check if the path exists
+            try:
+                path = Path(filepath)
+                if not path.exists():
+                    # Keep the # marker if path doesn't exist
+                    return match.group(0)
+            except Exception:
+                # Keep the # marker if path validation fails
+                return match.group(0)
+            
+            # Check if it's an absolute path (starts with /)
+            if filepath.startswith('/'):
+                return filepath  # Keep absolute paths as-is
+            else:
+                # Prepend ./ or .\ for relative paths
+                return f'./{filepath}' if IS_LINUX else f'.\\{filepath}'
+        
+        # Replace #filepath patterns with appropriate path format
         # Match # followed by non-whitespace characters (file path)
-        return re.sub(r'#([^\s]+)', r'./\1' if IS_LINUX else r'.\\\1', command)
+        return re.sub(r'#([^\s]+)', replace_file_marker, command)
     
     def _format_file_references(self, message: str) -> str:
         """Format file references in chat messages.
@@ -6741,7 +6771,7 @@ You can manually edit your configuration file at:
         self.app.call_from_thread(
             chat_panel.add_message, 
             "system", 
-            f"{EMOJI['robot']} Running agent: **{agent_name}**\n\n[dim]{agent_desc}[/dim]"
+            f"{EMOJI['robot']} Running agent: [bold]{agent_name}[/bold]\n\n[dim]{agent_desc}[/dim]"
         )
         
         # Set the current agent in the chat panel

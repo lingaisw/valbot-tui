@@ -4515,8 +4515,15 @@ Please check your configuration and try again.
         # Get the word at cursor (only returns non-empty if starts with #)
         word, start_col, end_col = self.get_word_at_cursor(text, cursor_pos)
         
-        # If word is empty, it means it doesn't start with # - no autocomplete
-        if not word:
+        # Check if we have a # at start_col (word can be empty if just "#" typed)
+        row, col = cursor_pos
+        lines = text.split('\n')
+        if row >= len(lines):
+            return False
+        line = lines[row]
+        
+        # Only proceed if there's a # at start_col
+        if start_col >= len(line) or line[start_col] != '#':
             return False
         
         # Get matching file paths

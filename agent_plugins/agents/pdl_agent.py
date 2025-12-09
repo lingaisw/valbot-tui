@@ -150,7 +150,6 @@ class MyCustomPlugin(AgentPlugin):
             # Now ask for test description
             console.print()
             console.print("[dim]Describe what the PDL test sequence should do...[/dim]")
-            console.print("[dim]Tip: Reference files with #filepath (e.g., #test_spec.txt)[/dim]")
             test_description = console.input("Describe PDL test sequence:").strip()
             return {
                 'mode': mode_value,
@@ -1526,13 +1525,8 @@ class MyCustomPlugin(AgentPlugin):
     
     def _enhance_description_with_file_content(self, test_description: str) -> str:
         """
-        Detect file references in test description using #filepath syntax and read their content.
-        Similar to valbot_tui.py's file reference handling.
-        
-        Supports:
-        - #filepath or #/absolute/path (hashtag prefix for file paths)
-        - Validates that files exist before reading
-        - Reads text, PDF, and DOCX files
+        Detect file references in test description and read their content.
+        Checks if any word contains "." and is a valid file path.
         
         Args:
             test_description: Original test description
@@ -1540,105 +1534,100 @@ class MyCustomPlugin(AgentPlugin):
         Returns:
             Enhanced description with file content included
         """
-        import re
         from pathlib import Path
         
-        # Find all #filepath patterns (similar to valbot_tui.py)
-        # Match # followed by non-whitespace characters (file path)
-        file_pattern = r'#([^\s]+)'
-        matches = re.findall(file_pattern, test_description)
+        # Unsupported file types that should be skipped
+        unsupported_extensions = {'.xlsx', '.xls', '.csv', '.db', '.sqlite', '.exe', '.dll', '.so', '.bin'}
         
-        if not matches:
-            return test_description
+        # Find all words that contain a "." which might be file paths
+        words = test_description.split()
+        potential_files = [word.strip('.,;:()[]{}"\'"') for word in words if '.' in word]
         
-        enhanced_parts = [test_description, "\n\n=== REFERENCED FILE CONTENT ===\n"]
+        # Remove duplicates
+        potential_files = list(set(potential_files))
+        
+        enhanced_parts = [test_description]
         files_read = 0
+        files_section_added = False
         
-        for file_ref in matches:
-            # Validate and resolve the file path
+        for file_ref in potential_files:
+            file_path = Path(file_ref).expanduser()
+            
+            # Try relative to current directory if not absolute
+            if not file_path.is_absolute():
+                file_path = Path.cwd() / file_ref
+            
+            # Check if it's a valid file that exists
+            if not file_path.exists() or not file_path.is_file():
+                continue
+            
+            # Get file extension
+            suffix = file_path.suffix.lower()
+            
+            # Skip unsupported file types
+            if suffix in unsupported_extensions:
+                self.console.print(f"  [yellow]⚠[/yellow] Skipping unsupported file type: {file_path.name}")
+                continue
+            
+            # Add files section header once
+            if not files_section_added:
+                enhanced_parts.append("\n\n=== REFERENCED FILE CONTENT ===\n")
+                files_section_added = True
+            
             try:
-                file_path = Path(file_ref).expanduser()
-                
-                # If not absolute, try relative to current directory
-                if not file_path.is_absolute():
-                    file_path = Path.cwd() / file_ref
-                
-                # Check if file exists
-                if not file_path.exists():
-                    self.console.print(f"  [dim]Skipping non-existent file: #{file_ref}[/dim]")
-                    continue
-                
-                if not file_path.is_file():
-                    self.console.print(f"  [dim]Skipping non-file path: #{file_ref}[/dim]")
-                    continue
-                
-                # Read file based on type
-                suffix = file_path.suffix.lower()
-                
-                # Check file size before reading (10 MB limit)
-                file_size = file_path.stat().st_size
-                max_size_bytes = 10 * 1024 * 1024  # 10 MB
-                
-                if file_size > max_size_bytes:
-                    self.console.print(f"  [yellow]⚠[/yellow] File too large to include: {file_path.name} ({file_size / (1024*1024):.2f} MB)")
-                    continue
-                
-                if suffix in ['.txt', '.spf', '.pdl', '.itpp', '.log', '.md', '.py', '.c', '.cpp', '.h', '.hpp', '.java', '.js', '.json', '.xml', '.yaml', '.yml']:
-                    # Read as text
-                    with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                        content = f.read()
-                    
-                    enhanced_parts.append(f"\n--- File: {file_path.name} (from #{file_ref}) ---\n")
-                    enhanced_parts.append(content)
-                    enhanced_parts.append(f"\n--- End of {file_path.name} ---\n")
-                    files_read += 1
-                    self.console.print(f"  [green]✓[/green] Read file: {file_path.name} ({file_size / 1024:.2f} KB)")
-                
-                elif suffix == '.pdf':
-                    # Read PDF (first 20 pages)
-                    if PyPDF2 is None:
-                        self.console.print(f"  [yellow]⚠[/yellow] PyPDF2 not installed, cannot read {file_path.name}")
-                        continue
-                    
+                # Handle PDF files specially
+                if suffix == '.pdf':
                     try:
                         with open(file_path, 'rb') as f:
                             pdf_reader = PyPDF2.PdfReader(f)
                             text_parts = []
-                            num_pages = min(len(pdf_reader.pages), 20)
-                            for page in pdf_reader.pages[:num_pages]:
+                            for page in pdf_reader.pages[:20]:  # Limit to first 20 pages
                                 text_parts.append(page.extract_text())
                             content = "\n".join(text_parts)
                         
-                        enhanced_parts.append(f"\n--- File: {file_path.name} (PDF, {num_pages} pages, from #{file_ref}) ---\n")
+                        enhanced_parts.append(f"\n--- File: {file_path.name} (PDF) ---\n")
                         enhanced_parts.append(content)
                         enhanced_parts.append(f"\n--- End of {file_path.name} ---\n")
                         files_read += 1
-                        self.console.print(f"  [green]✓[/green] Read PDF: {file_path.name} ({num_pages} pages)")
+                        self.console.print(f"  [green]✓[/green] Read referenced PDF: {file_path.name}")
                     except Exception as e:
                         self.console.print(f"  [yellow]⚠[/yellow] Could not read PDF {file_path.name}: {e}")
                 
+                # Handle DOCX files specially
                 elif suffix == '.docx':
-                    # Read DOCX
                     try:
                         doc = Document(file_path)
                         content = "\n".join([para.text for para in doc.paragraphs])
                         
-                        enhanced_parts.append(f"\n--- File: {file_path.name} (DOCX, from #{file_ref}) ---\n")
+                        enhanced_parts.append(f"\n--- File: {file_path.name} (DOCX) ---\n")
                         enhanced_parts.append(content)
                         enhanced_parts.append(f"\n--- End of {file_path.name} ---\n")
                         files_read += 1
-                        self.console.print(f"  [green]✓[/green] Read DOCX: {file_path.name}")
+                        self.console.print(f"  [green]✓[/green] Read referenced DOCX: {file_path.name}")
                     except Exception as e:
                         self.console.print(f"  [yellow]⚠[/yellow] Could not read DOCX {file_path.name}: {e}")
                 
+                # Handle all other files as text using read_file tool
                 else:
-                    self.console.print(f"  [dim]Unsupported file type: {file_path.name} ({suffix})[/dim]")
-                    
+                    try:
+                        file_content = read_file(str(file_path))
+                        if file_content and file_content.content:
+                            content = file_content.content
+                            
+                            enhanced_parts.append(f"\n--- File: {file_path.name} ---\n")
+                            enhanced_parts.append(content)
+                            enhanced_parts.append(f"\n--- End of {file_path.name} ---\n")
+                            files_read += 1
+                            self.console.print(f"  [green]✓[/green] Read referenced file: {file_path.name}")
+                        else:
+                            self.console.print(f"  [yellow]⚠[/yellow] Empty content from {file_path.name}")
+                    except Exception as e:
+                        self.console.print(f"  [yellow]⚠[/yellow] Could not read {file_path.name}: {e}")
+            
             except Exception as e:
-                self.console.print(f"  [yellow]⚠[/yellow] Error processing #{file_ref}: {e}")
+                self.console.print(f"  [yellow]⚠[/yellow] Error reading {file_ref}: {e}")
         
         if files_read > 0:
-            self.console.print(f"  [cyan]Files referenced:[/cyan] {files_read}")
             return "".join(enhanced_parts)
         else:
             return test_description

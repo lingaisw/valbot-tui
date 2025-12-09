@@ -27,8 +27,17 @@ import readchar
 import sys
 from prompt_toolkit import prompt
 from prompt_toolkit.key_binding import KeyBindings
-from agent_plugins.common_tools.terminal_tools import list_files, find_files, grep_in_files, show_file_tree, run_shell_command
-from agent_plugins.common_tools.file_tools import read_file, FileContent
+from agent_plugins.common_tools.terminal_tools import list_files, find_files, grep_in_files, show_file_tree
+from agent_plugins.common_tools.file_tools import (
+    read_file,
+    read_partial_file,
+    create_file,
+    write_file,
+    edit_string_in_file,
+    list_files_in_directory,
+    find_files_with_name,
+    FileContent
+)
 
 class MyCustomPlugin(AgentPlugin):
     """
@@ -54,16 +63,18 @@ class MyCustomPlugin(AgentPlugin):
     REQUIRED_ARGS = {}
     
     def get_initializer_args(self):
-        """Override to conditionally prompt for input_path only for mode 1."""
+        """Override to conditionally prompt for input_path only for modes that need file input."""
         # Import here to avoid issues if not available
         from rich.console import Console
         
         console = Console()
         
-        # Menu choices
+        # Menu choices - reordered with new ITPP option and PDL generation
         choices = [
-            ("1", "Convert SPF to PDL"),
-            ("2", "PDL Expert Consultation (interactive Q&A)")
+            ("1", "PDL Expert Consultation (interactive Q&A)"),
+            ("2", "Convert SPF to PDL"),
+            ("3", "Convert ITPP to PDL"),
+            ("4", "PDL Generation from Requirements")
         ]
         
         selected_index = 0
@@ -111,23 +122,43 @@ class MyCustomPlugin(AgentPlugin):
             console.print()
             
             mode_value = None
-            while mode_value not in ['1', '2']:
-                mode_value = console.input("[bold yellow]Select an option:[/bold yellow] ").strip()
-                if mode_value not in ['1', '2']:
-                    console.print("[red]Invalid selection. Please enter 1 or 2.[/red]")
+            while mode_value not in ['1', '2', '3', '4']:
+                mode_value = console.input("[bold yellow]Select an option (1, 2, 3, or 4):[/bold yellow] ").strip()
+                if mode_value not in ['1', '2', '3', '4']:
+                    console.print("[red]Invalid selection. Please enter 1, 2, 3, or 4.[/red]")
             
             selected_index = int(mode_value) - 1
         
         mode_value = choices[selected_index][0]
         console.print(f"\n[green]✓ Selected:[/green] {choices[selected_index][1]}\n")
         
-        # Only ask for input_path if mode is 1
-        if mode_value == '1':
+        # Ask for input_path if mode is 2 (SPF) or 3 (ITPP)
+        if mode_value == '2':
             console.print()
             input_path = console.input("[bold yellow]Enter the path to an SPF file or directory:[/bold yellow] ").strip()
             return {
                 'mode': mode_value,
                 'input_path': input_path
+            }
+        elif mode_value == '3':
+            console.print()
+            input_path = console.input("[bold yellow]Enter the path to an ITPP file or directory:[/bold yellow] ").strip()
+            return {
+                'mode': mode_value,
+                'input_path': input_path
+            }
+        elif mode_value == '4':
+            console.print()
+            console.print("[bold cyan]PDL Generation from Requirements[/bold cyan]")
+            console.print("[dim]Example: /nfs/site/disks/.../pchlp/ub/[/dim]\n")
+            ub_directory = console.input("[bold yellow]Enter the UB directory path for ICL files:[/bold yellow] ").strip()
+            console.print()
+            console.print("[dim]Describe what the PDL test sequence should do...[/dim]")
+            test_description = console.input("[bold yellow]Describe PDL test sequence:[/bold yellow] ").strip()
+            return {
+                'mode': mode_value,
+                'ub_directory': ub_directory,
+                'test_description': test_description
             }
         else:
             return {'mode': mode_value}
@@ -600,13 +631,20 @@ class MyCustomPlugin(AgentPlugin):
         Add autonomous tools for the agent to use during conversion.
         These tools help with file parsing and structure analysis.
         """
-        # Tools can be added here if needed for autonomous operation
+        # Terminal tools
         self.pdl_expert_agent.tool(list_files)
         self.pdl_expert_agent.tool(find_files)
         self.pdl_expert_agent.tool(grep_in_files)
         self.pdl_expert_agent.tool(show_file_tree)
-        self.pdl_expert_agent.tool(run_shell_command)
+        
+        # File tools
         self.pdl_expert_agent.tool(read_file)
+        self.pdl_expert_agent.tool(read_partial_file)
+        self.pdl_expert_agent.tool(create_file)
+        self.pdl_expert_agent.tool(write_file)
+        self.pdl_expert_agent.tool(edit_string_in_file)
+        self.pdl_expert_agent.tool(list_files_in_directory)
+        self.pdl_expert_agent.tool(find_files_with_name)
 
     def find_spf_files(self, input_path: str) -> List[str]:
         """
@@ -634,6 +672,44 @@ class MyCustomPlugin(AgentPlugin):
             self.console.print(f"[red]Error: Path does not exist: {input_path}[/red]")
         
         return spf_files
+    
+    def find_itpp_files(self, input_path: str) -> List[str]:
+        """
+        Find all ITPP files in the given path.
+        
+        Args:
+            input_path: File path or directory path
+            
+        Returns:
+            List of ITPP file paths
+        """
+        itpp_files = []
+        path = Path(input_path)
+        
+        if path.is_file():
+            if path.suffix.lower() in ['.itpp', '.txt']:  # ITPP files can be .itpp or .txt
+                itpp_files.append(str(path))
+            else:
+                self.console.print(f"[yellow]Warning: {input_path} is not an ITPP file (.itpp or .txt)[/yellow]")
+        elif path.is_dir():
+            self.console.print(f"[cyan]Scanning directory:[/cyan] {input_path}")
+            itpp_files = [str(f) for f in path.rglob('*.itpp')] + [str(f) for f in path.rglob('*.txt')]
+            # Filter to only include files that look like ITPP (contain ITPP commands)
+            filtered_files = []
+            for f in itpp_files:
+                try:
+                    with open(f, 'r', encoding='utf-8', errors='ignore') as file:
+                        content = file.read(1000)  # Read first 1000 chars
+                        if any(cmd in content for cmd in ['iProc', 'iWrite', 'iRead', 'iApply', 'iCall']):
+                            filtered_files.append(f)
+                except:
+                    pass
+            itpp_files = filtered_files
+            self.console.print(f"[green]Found {len(itpp_files)} ITPP files[/green]")
+        else:
+            self.console.print(f"[red]Error: Path does not exist: {input_path}[/red]")
+        
+        return itpp_files
 
     def read_spf_file(self, file_path: str) -> Optional[Dict[str, Any]]:
         """
@@ -662,6 +738,38 @@ class MyCustomPlugin(AgentPlugin):
             }
             
             return spf_data
+        except Exception as e:
+            self.console.print(f"[red]Error reading {file_path}: {e}[/red]")
+            return None
+    
+    def read_itpp_file(self, file_path: str) -> Optional[Dict[str, Any]]:
+        """
+        Read and parse ITPP file structure.
+        
+        Args:
+            file_path: Path to ITPP file
+            
+        Returns:
+            Dictionary containing file metadata and content
+        """
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            # Basic structure analysis
+            itpp_data = {
+                "file_path": file_path,
+                "file_name": Path(file_path).name,
+                "content": content,
+                "line_count": len(content.split('\n')),
+                "has_iproc": "iProc" in content,
+                "has_iwrite": "iWrite" in content,
+                "has_iread": "iRead" in content,
+                "has_isim": "iSim" in content,
+                "size_bytes": len(content)
+            }
+            
+            return itpp_data
         except Exception as e:
             self.console.print(f"[red]Error reading {file_path}: {e}[/red]")
             return None
@@ -700,6 +808,45 @@ class MyCustomPlugin(AgentPlugin):
             for cmd, count in patterns.items():
                 if count > 0:
                     analysis += f"        - {cmd}: {count} occurrences\n"
+        
+        return analysis
+    
+    def analyze_itpp_structure(self, itpp_data: Dict) -> str:
+        """
+        Analyze ITPP file structure to provide context for conversion.
+        
+        Args:
+            itpp_data: ITPP file data dictionary
+            
+        Returns:
+            Analysis summary string
+        """
+        analysis = f"""
+        ITPP File Analysis:
+        - File: {itpp_data['file_name']}
+        - Lines: {itpp_data['line_count']}
+        - Size: {itpp_data['size_bytes']} bytes
+        - Contains iProc: {itpp_data['has_iproc']}
+        - Contains iWrite: {itpp_data['has_iwrite']}
+        - Contains iRead: {itpp_data['has_iread']}
+        - Contains iSim: {itpp_data['has_isim']}
+        """
+        
+        # Extract key patterns
+        content = itpp_data['content']
+        patterns = {
+            'iProc': len(re.findall(r'\biProc\b', content)),
+            'iWrite': len(re.findall(r'\biWrite\b', content)),
+            'iRead': len(re.findall(r'\biRead\b', content)),
+            'iApply': len(re.findall(r'\biApply\b', content)),
+            'iSim': len(re.findall(r'\biSim\b', content)),
+        }
+        
+        if any(patterns.values()):
+            analysis += "\n        Key Commands Found:\n"
+            for cmd, count in patterns.items():
+                if count > 0:
+                    analysis += f"        - {cmd}: {count}\n"
         
         return analysis
 
@@ -939,6 +1086,147 @@ class MyCustomPlugin(AgentPlugin):
                 "spf_file": spf_data['file_path'],
                 "error": str(e)
             }
+    
+    def convert_itpp_to_pdl(self, itpp_data: Dict) -> Dict[str, Any]:
+        """
+        Convert ITPP content to optimized PDL using two-stage AI approach:
+        1. Understand what the ITPP does and identify optimization opportunities
+        2. Generate improved PDL based on that understanding
+        
+        Args:
+            itpp_data: ITPP file data dictionary
+            
+        Returns:
+            Dictionary containing conversion results
+        """
+        # Analyze structure first
+        analysis = self.analyze_itpp_structure(itpp_data)
+        
+        try:
+            # ====================================================================
+            # STAGE 1: UNDERSTAND ITPP INTENT AND PATTERNS
+            # ====================================================================
+            self.console.print(f"  [cyan]Stage 1:[/cyan] Analyzing ITPP patterns...")
+            
+            understanding_prompt = f"""
+            Analyze the following ITPP test code and identify:
+            1. What test operations it performs (register access, signal polling, etc.)
+            2. Opportunities for optimization (dynamic register access, macro mapping, etc.)
+            3. Repeated patterns that could be refactored
+            4. Any hardcoded register names that could be made dynamic
+            5. Long signal paths that could benefit from macro_map
+            
+            {analysis}
+            
+            ITPP CONTENT:
+            {itpp_data['content']}
+            
+            Provide a clear description of:
+            - The test's purpose and operations
+            - Optimization opportunities (dynamic vs hardcoded access)
+            - Signal paths that should use macro_map
+            - Register access patterns that could use get_icl_instances
+            """
+            
+            understanding_result = asyncio.run(self.understanding_agent.run(understanding_prompt))
+            test_understanding = understanding_result.data
+            
+            self.console.print(f"  [green]✓[/green] ITPP patterns analyzed")
+            
+            # ====================================================================
+            # STAGE 2: GENERATE OPTIMIZED PDL
+            # ====================================================================
+            self.console.print(f"  [cyan]Stage 2:[/cyan] Generating optimized PDL...")
+            
+            # Build RAG query - PRIORITIZE optimization patterns
+            rag_query = "iSim macro_map get_icl_instances get_icl_modules foreach_in_collection dynamic register access wildcard patterns PDL optimization best practices"
+            
+            # Retrieve relevant PDL knowledge
+            self.console.print(f"  [dim]Retrieving PDL optimization patterns from knowledge base...[/dim]")
+            relevant_pdl_knowledge = self.get_relevant_knowledge(rag_query, top_k=12)
+            
+            # Generate optimized PDL
+            pdl_generation_prompt = f"""
+            Convert the following ITPP code to optimized PDL.
+            
+            ITPP ANALYSIS AND OPTIMIZATION OPPORTUNITIES:
+            {test_understanding}
+            
+            PDL SYNTAX EXAMPLES AND BEST PRACTICES:
+            {relevant_pdl_knowledge}
+            
+            CRITICAL OPTIMIZATION REQUIREMENTS:
+            1. PRIORITIZE dynamic register access using get_icl_instances + foreach_in_collection
+            2. Replace hardcoded register names with dynamic lookups wherever possible
+            3. Use iSim macro_map for any repeated or long signal paths
+            4. Apply wildcard patterns for module/register instance lookups
+            5. Use proper PDL headers (both required lines)
+            6. Add iNote comments to document optimizations made
+            7. Ensure all parameter formats match examples (0x, 0b, 0d prefixes)
+            8. Validate iSim command parameters
+            
+            CONVERSION RULES:
+            - If ITPP has multiple similar iWrite/iRead to same register type → use get_icl_instances
+            - If ITPP has long signal paths used multiple times → use iSim macro_map
+            - If ITPP has hardcoded instance names → convert to wildcard lookup
+            - Preserve test functionality while improving code structure
+            - Add clear iNote documentation for all optimizations
+            
+            Format your response EXACTLY as:
+            === PDL CODE ===
+            [Optimized PDL code with required headers and best practices applied]
+            
+            === IMPLEMENTATION NOTES ===
+            [List all optimizations made and why]
+            [Confirm dynamic access patterns used]
+            [Confirm macro_map usage for signal paths]
+            [Confirm parameter formats match examples]
+            """
+            
+            pdl_result = asyncio.run(self.pdl_generation_agent.run(pdl_generation_prompt))
+            
+            self.console.print(f"  [green]✓[/green] Optimized PDL generated")
+            
+            # Parse the result
+            pdl_code = ""
+            implementation_notes = ""
+            
+            response = pdl_result.data
+            if "=== PDL CODE ===" in response:
+                parts = response.split("=== PDL CODE ===")
+                if len(parts) > 1:
+                    remaining = parts[1]
+                    if "=== IMPLEMENTATION NOTES ===" in remaining:
+                        code_part, notes_part = remaining.split("=== IMPLEMENTATION NOTES ===", 1)
+                        pdl_code = code_part.strip()
+                        implementation_notes = notes_part.strip()
+                    else:
+                        pdl_code = remaining.strip()
+            else:
+                pdl_code = response
+                implementation_notes = "Generated from ITPP input with optimizations applied."
+            
+            # Combine both token usage
+            total_tokens = understanding_result.usage().total_tokens + pdl_result.usage().total_tokens
+            
+            return {
+                "success": True,
+                "itpp_file": itpp_data['file_path'],
+                "test_understanding": test_understanding,
+                "pdl_code": pdl_code,
+                "implementation_notes": implementation_notes,
+                "conversion_notes": f"ITPP to PDL conversion with optimizations:\n\n{test_understanding}\n\n{implementation_notes}",
+                "tokens_used": total_tokens
+            }
+        except Exception as e:
+            self.console.print(f"  [red]Conversion failed: {e}[/red]")
+            import traceback
+            traceback.print_exc()
+            return {
+                "success": False,
+                "itpp_file": itpp_data['file_path'],
+                "error": str(e)
+            }
 
     def save_pdl_file(self, conversion_result: Dict, output_dir: Optional[str] = None) -> Optional[str]:
         """
@@ -954,7 +1242,13 @@ class MyCustomPlugin(AgentPlugin):
         if not conversion_result.get('success'):
             return None
         
-        spf_path = Path(conversion_result['spf_file'])
+        # Handle both SPF and ITPP sources
+        source_file = conversion_result.get('spf_file') or conversion_result.get('itpp_file')
+        if not source_file:
+            self.console.print("[red]Error: No source file specified in conversion result[/red]")
+            return None
+        
+        spf_path = Path(source_file)
         
         # Determine output directory
         if output_dir:
@@ -1020,6 +1314,492 @@ class MyCustomPlugin(AgentPlugin):
         except Exception as e:
             self.console.print(f"[red]Error saving PDL file: {e}[/red]")
             return None
+    
+    def run_itpp_conversion_mode(self, context, **kwargs):
+        """
+        ITPP to PDL conversion workflow with optimization.
+        """
+        # Get input_path from initializer_args
+        input_path = self.initializer_args.get('input_path')
+        
+        # Also check kwargs in case it's passed differently
+        if not input_path:
+            input_path = kwargs.get('input_path')
+        
+        if not input_path:
+            self.console.print("[red]Error: input_path is required for ITPP conversion mode[/red]")
+            return
+        
+        # Display header
+        self.console.rule("[bold blue]ITPP to PDL Converter & Optimizer[/bold blue]", style="blue")
+        self.console.print(f"\n[bold cyan]Input Path:[/bold cyan] {input_path}\n")
+        
+        # Stage 1: Find ITPP files
+        self.console.print("[bold yellow]STAGE 1: Finding ITPP Files[/bold yellow]", justify="center")
+        itpp_files = self.find_itpp_files(input_path)
+        
+        if not itpp_files:
+            self.console.print("\n[bold red]No ITPP files found![/bold red]")
+            return
+        
+        self.console.print(f"\n[bold green]Found {len(itpp_files)} ITPP file(s) to convert[/bold green]\n")
+        
+        # Stage 2: Convert each file
+        self.console.print("[bold yellow]STAGE 2: Converting & Optimizing ITPP to PDL[/bold yellow]", justify="center")
+        self.console.print("[dim]Stage 2a: Analyzing patterns | Stage 2b: Generating optimized PDL[/dim]\n", justify="center")
+        
+        conversion_results = []
+        total_tokens = 0
+        
+        for idx, itpp_file in enumerate(itpp_files, 1):
+            self.console.print(f"\n[bold white]({idx}/{len(itpp_files)})[/bold white] Processing: [cyan]{Path(itpp_file).name}[/cyan]")
+            
+            # Read ITPP file
+            itpp_data = self.read_itpp_file(itpp_file)
+            if not itpp_data:
+                continue
+            
+            # Convert to optimized PDL
+            result = self.convert_itpp_to_pdl(itpp_data)
+            conversion_results.append(result)
+            
+            if result.get('success'):
+                total_tokens += result.get('tokens_used', 0)
+            else:
+                self.console.print(f"  [red]✗ Conversion failed[/red]")
+        
+        # Stage 3: Save results
+        self.console.print(f"\n[bold yellow]STAGE 3: Saving Optimized PDL Files[/bold yellow]", justify="center")
+        
+        saved_files = []
+        failed_files = []
+        
+        for result in conversion_results:
+            if result.get('success'):
+                pdl_path = self.save_pdl_file(result)
+                if pdl_path:
+                    saved_files.append(pdl_path)
+                    self.console.print(f"  [green]✓[/green] Saved: {Path(pdl_path).name}")
+                else:
+                    failed_files.append(result.get('itpp_file', 'Unknown'))
+            else:
+                failed_files.append(result.get('itpp_file', 'Unknown'))
+        
+        # Stage 4: Generate summary report
+        self.console.print(f"\n[bold yellow]STAGE 4: Generating Summary[/bold yellow]", justify="center")
+        
+        summary = {
+            "total_files_processed": len(itpp_files),
+            "successful_conversions": len(saved_files),
+            "failed_conversions": len(failed_files),
+            "total_ai_tokens_used": total_tokens,
+            "converted_files": saved_files,
+            "failed_files": failed_files,
+            "conversion_results": conversion_results
+        }
+        
+        # Save summary JSON
+        summary_file = Path.cwd() / "itpp_to_pdl_conversion_summary.json"
+        
+        try:
+            with open(summary_file, 'w', encoding='utf-8') as f:
+                json.dump(summary, f, indent=2)
+            self.console.print(f"\n[green]Summary saved to:[/green] [bold]{summary_file}[/bold]")
+        except Exception as e:
+            self.console.print(f"\n[red]Error saving summary: {e}[/red]")
+        
+        # Final summary display
+        self.console.rule("[bold blue]Conversion Complete[/bold blue]", style="blue")
+        self.console.print(f"""
+[bold green]Summary:[/bold green]
+  • Total ITPP files: {len(itpp_files)}
+  • Successfully converted: {len(saved_files)}
+  • Failed: {len(failed_files)}
+  • AI Tokens used: {total_tokens}
+        """, justify="center")
+        
+        if saved_files:
+            self.console.print("\n[bold green]Converted PDL Files:[/bold green]")
+            for pdl_file in saved_files:
+                self.console.print(f"  • {pdl_file}")
+        
+        if failed_files:
+            self.console.print("\n[bold red]Failed Conversions:[/bold red]")
+            for failed_file in failed_files:
+                self.console.print(f"  • {failed_file}")
+    
+    def find_icl_files(self, ub_directory: str) -> List[Dict[str, str]]:
+        """
+        Find all ICL files in the UB directory structure.
+        
+        Args:
+            ub_directory: Path to UB directory containing partitions
+            
+        Returns:
+            List of dictionaries with partition name and ICL file path
+        """
+        icl_files = []
+        ub_path = Path(ub_directory)
+        
+        if not ub_path.exists():
+            self.console.print(f"[red]Error: UB directory does not exist: {ub_directory}[/red]")
+            return icl_files
+        
+        if not ub_path.is_dir():
+            self.console.print(f"[red]Error: Path is not a directory: {ub_directory}[/red]")
+            return icl_files
+        
+        self.console.print(f"[cyan]Scanning UB directory:[/cyan] {ub_directory}")
+        
+        # Look for partition directories
+        for partition_dir in ub_path.iterdir():
+            if not partition_dir.is_dir():
+                continue
+            
+            partition_name = partition_dir.name
+            
+            # Expected ICL file path pattern:
+            # <ub_dir>/<partition_name>/tsdb_outdir/dft_inserted_designs/<partition_name>_extraction.dft_inserted_design/<partition_name>.icl
+            icl_path = partition_dir / "tsdb_outdir" / "dft_inserted_designs" / f"{partition_name}_extraction.dft_inserted_design" / f"{partition_name}.icl"
+            
+            if icl_path.exists():
+                icl_files.append({
+                    'partition_name': partition_name,
+                    'icl_path': str(icl_path)
+                })
+                self.console.print(f"  [green]✓[/green] Found: {partition_name}.icl")
+        
+        self.console.print(f"[green]Found {len(icl_files)} ICL file(s)[/green]")
+        return icl_files
+    
+    def read_icl_file(self, icl_path: str) -> Optional[Dict[str, Any]]:
+        """
+        Read and parse ICL file to extract register and module information.
+        
+        Args:
+            icl_path: Path to ICL file
+            
+        Returns:
+            Dictionary containing ICL metadata and relevant content
+        """
+        try:
+            with open(icl_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            # Extract key information from ICL file
+            # ICL files contain register definitions, module hierarchies, etc.
+            icl_data = {
+                "file_path": icl_path,
+                "file_name": Path(icl_path).name,
+                "content": content,
+                "line_count": len(content.split('\n')),
+                "size_bytes": len(content)
+            }
+            
+            # Extract module and register patterns
+            # Look for register definitions, module instances, etc.
+            modules = re.findall(r'module\s+(\w+)', content, re.IGNORECASE)
+            registers = re.findall(r'register\s+(\w+)', content, re.IGNORECASE)
+            
+            icl_data['modules'] = list(set(modules))[:20]  # First 20 unique modules
+            icl_data['registers'] = list(set(registers))[:50]  # First 50 unique registers
+            
+            return icl_data
+        except Exception as e:
+            self.console.print(f"[red]Error reading {icl_path}: {e}[/red]")
+            return None
+    
+    def generate_pdl_from_requirements(
+        self, 
+        test_description: str, 
+        icl_files: List[Dict[str, str]]
+    ) -> Dict[str, Any]:
+        """
+        Generate PDL code from user requirements and ICL files.
+        
+        Args:
+            test_description: User's description of what the test should do
+            icl_files: List of ICL file information
+            
+        Returns:
+            Dictionary containing generation results
+        """
+        try:
+            self.console.print(f"\n[cyan]Stage 1:[/cyan] Analyzing ICL files and requirements...")
+            
+            # Read ICL files to understand available modules and registers
+            icl_context = []
+            for icl_info in icl_files[:5]:  # Limit to first 5 partitions to avoid token overflow
+                icl_data = self.read_icl_file(icl_info['icl_path'])
+                if icl_data:
+                    icl_summary = f"""
+Partition: {icl_info['partition_name']}
+ICL File: {icl_info['icl_path']}
+Modules: {', '.join(icl_data.get('modules', [])[:10])}
+Registers: {', '.join(icl_data.get('registers', [])[:20])}
+"""
+                    icl_context.append(icl_summary)
+            
+            icl_context_str = "\n".join(icl_context)
+            
+            self.console.print(f"  [green]✓[/green] Analyzed {len(icl_context)} ICL file(s)")
+            
+            # ====================================================================
+            # STAGE 1: UNDERSTAND REQUIREMENTS AND AVAILABLE RESOURCES
+            # ====================================================================
+            understanding_prompt = f"""
+            Analyze the following test requirements and available ICL resources.
+            
+            TEST REQUIREMENTS:
+            {test_description}
+            
+            AVAILABLE ICL RESOURCES (Partitions, Modules, Registers):
+            {icl_context_str}
+            
+            Based on the test requirements and available resources:
+            1. Identify which partitions/modules/registers are needed
+            2. Determine the sequence of operations required
+            3. Identify register access patterns (should use dynamic get_icl_instances approach)
+            4. Determine if signal polling or macro mapping is needed
+            5. List timing requirements or delays
+            
+            Provide a detailed implementation plan.
+            """
+            
+            understanding_result = asyncio.run(self.understanding_agent.run(understanding_prompt))
+            implementation_plan = understanding_result.data
+            
+            self.console.print(f"  [green]✓[/green] Implementation plan created")
+            
+            # ====================================================================
+            # STAGE 2: GENERATE PDL CODE
+            # ====================================================================
+            self.console.print(f"\n[cyan]Stage 2:[/cyan] Generating PDL code...")
+            
+            # Build RAG query focusing on PDL best practices
+            rag_query = "PDL iProc iWrite iRead iApply get_icl_instances get_icl_modules foreach_in_collection iSim macro_map dynamic register access best practices"
+            
+            # Retrieve relevant PDL knowledge
+            self.console.print(f"  [dim]Retrieving PDL syntax and best practices...[/dim]")
+            relevant_pdl_knowledge = self.get_relevant_knowledge(rag_query, top_k=12)
+            
+            # Generate PDL code
+            pdl_generation_prompt = f"""
+            Generate PDL code based on the following implementation plan.
+            
+            IMPLEMENTATION PLAN:
+            {implementation_plan}
+            
+            AVAILABLE ICL RESOURCES:
+            {icl_context_str}
+            
+            PDL SYNTAX EXAMPLES AND BEST PRACTICES:
+            {relevant_pdl_knowledge}
+            
+            CRITICAL REQUIREMENTS:
+            1. ALWAYS start with the TWO required PDL header lines:
+               iProcsForModule [get_single_name [get_current_design -icl]] 
+               source $::env(DUVE_M_HOME)/verif/pdl/common/tap_utils.pdl
+            2. PRIORITIZE dynamic register access using get_icl_instances + foreach_in_collection
+            3. Use iSim macro_map for any long or repeated signal paths
+            4. Use wildcard patterns for module/register lookups (e.g., {{*module*pwell_wrapper*register}})
+            5. Add comprehensive iNote comments explaining each section
+            6. Use proper value formats (0x for hex, 0b for binary, 0d for decimal)
+            7. Validate all command parameters match the examples
+            8. Use get_icl_modules with wildcard patterns for flexible instance resolution
+            
+            Generate complete, production-ready PDL code that implements the requirements.
+            
+            Format your response EXACTLY as:
+            === PDL CODE ===
+            [Complete PDL code with headers and best practices]
+            
+            === IMPLEMENTATION NOTES ===
+            [Explain the approach, dynamic patterns used, optimizations applied]
+            """
+            
+            pdl_result = asyncio.run(self.pdl_generation_agent.run(pdl_generation_prompt))
+            
+            self.console.print(f"  [green]✓[/green] PDL code generated")
+            
+            # Parse the result
+            pdl_code = ""
+            implementation_notes = ""
+            
+            response = pdl_result.data
+            if "=== PDL CODE ===" in response:
+                parts = response.split("=== PDL CODE ===")
+                if len(parts) > 1:
+                    remaining = parts[1]
+                    if "=== IMPLEMENTATION NOTES ===" in remaining:
+                        code_part, notes_part = remaining.split("=== IMPLEMENTATION NOTES ===", 1)
+                        pdl_code = code_part.strip()
+                        implementation_notes = notes_part.strip()
+                    else:
+                        pdl_code = remaining.strip()
+            else:
+                pdl_code = response
+                implementation_notes = "Generated from user requirements and ICL files."
+            
+            # Combine token usage
+            total_tokens = understanding_result.usage().total_tokens + pdl_result.usage().total_tokens
+            
+            return {
+                "success": True,
+                "test_description": test_description,
+                "implementation_plan": implementation_plan,
+                "pdl_code": pdl_code,
+                "implementation_notes": implementation_notes,
+                "icl_files_used": [icl['partition_name'] for icl in icl_files],
+                "tokens_used": total_tokens
+            }
+            
+        except Exception as e:
+            self.console.print(f"  [red]PDL generation failed: {e}[/red]")
+            import traceback
+            traceback.print_exc()
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    def save_generated_pdl(self, generation_result: Dict, output_filename: str = "generated_test.pdl") -> Optional[str]:
+        """
+        Save generated PDL to file.
+        
+        Args:
+            generation_result: Generation result dictionary
+            output_filename: Output filename for PDL
+            
+        Returns:
+            Path to saved PDL file
+        """
+        if not generation_result.get('success'):
+            return None
+        
+        # Use current working directory
+        out_dir = Path.cwd()
+        pdl_path = out_dir / output_filename
+        
+        try:
+            pdl_code = generation_result['pdl_code']
+            
+            # Ensure the required TWO header lines are at the top
+            required_line1 = "iProcsForModule [get_single_name [get_current_design -icl]]"
+            required_line2 = "source $::env(DUVE_M_HOME)/verif/pdl/common/tap_utils.pdl"
+            
+            pdl_code = pdl_code.strip()
+            
+            # Check if headers are already present
+            has_line1 = pdl_code.startswith(required_line1)
+            has_line2 = required_line2 in pdl_code.split('\n')[:5]
+            
+            if not (has_line1 and has_line2):
+                # Add headers if missing
+                pdl_code = f"{required_line1}\n{required_line2}\n\n{pdl_code}"
+            
+            with open(pdl_path, 'w', encoding='utf-8') as f:
+                f.write(pdl_code)
+            
+            # Save implementation plan and notes
+            notes_path = out_dir / f"{Path(output_filename).stem}_notes.txt"
+            with open(notes_path, 'w', encoding='utf-8') as f:
+                f.write(f"TEST DESCRIPTION:\n{generation_result.get('test_description', 'N/A')}\n\n")
+                f.write(f"IMPLEMENTATION PLAN:\n{generation_result.get('implementation_plan', 'N/A')}\n\n")
+                f.write(f"IMPLEMENTATION NOTES:\n{generation_result.get('implementation_notes', 'N/A')}\n\n")
+                f.write(f"ICL FILES USED:\n")
+                for partition in generation_result.get('icl_files_used', []):
+                    f.write(f"  - {partition}\n")
+            
+            return str(pdl_path)
+        except Exception as e:
+            self.console.print(f"[red]Error saving PDL file: {e}[/red]")
+            return None
+    
+    def run_pdl_generation_mode(self, context, **kwargs):
+        """
+        PDL generation from requirements and ICL files workflow.
+        """
+        # Get parameters from initializer_args
+        ub_directory = self.initializer_args.get('ub_directory')
+        test_description = self.initializer_args.get('test_description')
+        
+        # Also check kwargs
+        if not ub_directory:
+            ub_directory = kwargs.get('ub_directory')
+        if not test_description:
+            test_description = kwargs.get('test_description')
+        
+        if not ub_directory or not test_description:
+            self.console.print("[red]Error: ub_directory and test_description are required for PDL generation mode[/red]")
+            return
+        
+        # Display header
+        self.console.rule("[bold blue]PDL Generation from Requirements[/bold blue]", style="blue")
+        self.console.print(f"\n[bold cyan]UB Directory:[/bold cyan] {ub_directory}")
+        self.console.print(f"[bold cyan]Test Requirements:[/bold cyan] {test_description}\n")
+        
+        # Stage 1: Find ICL files
+        self.console.print("[bold yellow]STAGE 1: Finding ICL Files[/bold yellow]", justify="center")
+        icl_files = self.find_icl_files(ub_directory)
+        
+        if not icl_files:
+            self.console.print("\n[bold red]No ICL files found in the specified UB directory![/bold red]")
+            self.console.print("[dim]Expected path pattern: <ub_dir>/<partition>/tsdb_outdir/dft_inserted_designs/<partition>_extraction.dft_inserted_design/<partition>.icl[/dim]")
+            return
+        
+        self.console.print(f"\n[bold green]Found {len(icl_files)} ICL file(s)[/bold green]")
+        for icl_info in icl_files:
+            self.console.print(f"  • {icl_info['partition_name']}")
+        
+        # Stage 2: Generate PDL
+        self.console.print(f"\n[bold yellow]STAGE 2: Generating PDL from Requirements[/bold yellow]", justify="center")
+        
+        result = self.generate_pdl_from_requirements(test_description, icl_files)
+        
+        if not result.get('success'):
+            self.console.print("\n[bold red]PDL generation failed![/bold red]")
+            if 'error' in result:
+                self.console.print(f"[red]Error: {result['error']}[/red]")
+            return
+        
+        # Stage 3: Save PDL
+        self.console.print(f"\n[bold yellow]STAGE 3: Saving Generated PDL[/bold yellow]", justify="center")
+        
+        # Ask user for output filename
+        from rich.console import Console
+        console = Console()
+        console.print()
+        output_filename = console.input("[bold yellow]Enter output filename (default: generated_test.pdl):[/bold yellow] ").strip()
+        if not output_filename:
+            output_filename = "generated_test.pdl"
+        elif not output_filename.endswith('.pdl'):
+            output_filename += '.pdl'
+        
+        pdl_path = self.save_generated_pdl(result, output_filename)
+        
+        if pdl_path:
+            self.console.print(f"\n[green]✓ PDL saved to:[/green] [bold]{pdl_path}[/bold]")
+            notes_path = Path(pdl_path).parent / f"{Path(pdl_path).stem}_notes.txt"
+            self.console.print(f"[green]✓ Notes saved to:[/green] [bold]{notes_path}[/bold]")
+        else:
+            self.console.print("\n[red]Failed to save PDL file[/red]")
+            return
+        
+        # Final summary
+        self.console.rule("[bold blue]Generation Complete[/bold blue]", style="blue")
+        self.console.print(f"""
+[bold green]Summary:[/bold green]
+  • ICL files analyzed: {len(icl_files)}
+  • Partitions used: {', '.join(result.get('icl_files_used', []))}
+  • AI Tokens used: {result.get('tokens_used', 0)}
+  • Output file: {output_filename}
+        """, justify="center")
+        
+        # Display implementation notes
+        if result.get('implementation_notes'):
+            self.console.print("\n[bold cyan]Implementation Notes:[/bold cyan]")
+            self.console.print(Panel(result['implementation_notes'], border_style="cyan"))
 
     def run_pdl_expert_mode(self, context, **kwargs):
         """
@@ -1157,12 +1937,21 @@ class MyCustomPlugin(AgentPlugin):
             self.initializer_args.update(init_args)
             mode = self.initializer_args.get('mode', '1')
         
-        if mode == '2':
+        if mode == '1':
             # PDL Expert consultation mode
             return self.run_pdl_expert_mode(context, **kwargs)
-        else:
-            # SPF to PDL conversion mode (default)
+        elif mode == '2':
+            # SPF to PDL conversion mode
             return self.run_spf_conversion_mode(context, **kwargs)
+        elif mode == '3':
+            # ITPP to PDL conversion mode
+            return self.run_itpp_conversion_mode(context, **kwargs)
+        elif mode == '4':
+            # PDL generation from requirements mode
+            return self.run_pdl_generation_mode(context, **kwargs)
+        else:
+            self.console.print(f"[red]Error: Unknown mode '{mode}'[/red]")
+            return
     
     def run_spf_conversion_mode(self, context, **kwargs):
         """

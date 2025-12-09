@@ -152,13 +152,24 @@ class MyCustomPlugin(AgentPlugin):
             console.print("[bold cyan]PDL Generation from Requirements[/bold cyan]")
             console.print("[dim]Example: /nfs/site/disks/.../pchlp/ub/[/dim]\n")
             ub_directory = console.input("[bold yellow]Enter the UB directory path for ICL files:[/bold yellow] ").strip()
+            
+            # Immediately find and list ICL files
+            console.print()
+            icl_files = self.find_icl_files(ub_directory)
+            
+            if not icl_files:
+                console.print("[red]No ICL files found. Exiting.[/red]")
+                return {'mode': mode_value, 'error': 'no_icl_files'}
+            
+            # Now ask for test description
             console.print()
             console.print("[dim]Describe what the PDL test sequence should do...[/dim]")
             test_description = console.input("[bold yellow]Describe PDL test sequence:[/bold yellow] ").strip()
             return {
                 'mode': mode_value,
                 'ub_directory': ub_directory,
-                'test_description': test_description
+                'test_description': test_description,
+                'icl_files': icl_files  # Pass found ICL files
             }
         else:
             return {'mode': mode_value}
@@ -1469,7 +1480,8 @@ class MyCustomPlugin(AgentPlugin):
                 })
                 self.console.print(f"  [green]✓[/green] Found: {partition_name}.icl")
         
-        self.console.print(f"[green]Found {len(icl_files)} ICL file(s)[/green]")
+        if icl_files:
+            self.console.print(f"\n[green]✓ Total: {len(icl_files)} ICL file(s)[/green]")
         return icl_files
     
     def read_icl_file(self, icl_path: str) -> Optional[Dict[str, Any]]:
@@ -1723,37 +1735,41 @@ Registers: {', '.join(icl_data.get('registers', [])[:20])}
         # Get parameters from initializer_args
         ub_directory = self.initializer_args.get('ub_directory')
         test_description = self.initializer_args.get('test_description')
+        icl_files = self.initializer_args.get('icl_files')  # Already found during input
         
         # Also check kwargs
         if not ub_directory:
             ub_directory = kwargs.get('ub_directory')
         if not test_description:
             test_description = kwargs.get('test_description')
+        if not icl_files:
+            icl_files = kwargs.get('icl_files')
+        
+        # Check for error from get_initializer_args
+        if self.initializer_args.get('error') == 'no_icl_files':
+            return
         
         if not ub_directory or not test_description:
             self.console.print("[red]Error: ub_directory and test_description are required for PDL generation mode[/red]")
             return
         
+        # If ICL files weren't found during input (shouldn't happen), find them now
+        if not icl_files:
+            self.console.print("[bold yellow]Finding ICL Files...[/bold yellow]")
+            icl_files = self.find_icl_files(ub_directory)
+            if not icl_files:
+                self.console.print("\n[bold red]No ICL files found in the specified UB directory![/bold red]")
+                self.console.print("[dim]Expected path pattern: <ub_dir>/<partition>/tsdb_outdir/dft_inserted_designs/<partition>_extraction.dft_inserted_design/<partition>.icl[/dim]")
+                return
+        
         # Display header
         self.console.rule("[bold blue]PDL Generation from Requirements[/bold blue]", style="blue")
         self.console.print(f"\n[bold cyan]UB Directory:[/bold cyan] {ub_directory}")
-        self.console.print(f"[bold cyan]Test Requirements:[/bold cyan] {test_description}\n")
+        self.console.print(f"[bold cyan]Test Requirements:[/bold cyan] {test_description}")
+        self.console.print(f"[bold cyan]ICL Files:[/bold cyan] {len(icl_files)} partition(s)\n")
         
-        # Stage 1: Find ICL files
-        self.console.print("[bold yellow]STAGE 1: Finding ICL Files[/bold yellow]", justify="center")
-        icl_files = self.find_icl_files(ub_directory)
-        
-        if not icl_files:
-            self.console.print("\n[bold red]No ICL files found in the specified UB directory![/bold red]")
-            self.console.print("[dim]Expected path pattern: <ub_dir>/<partition>/tsdb_outdir/dft_inserted_designs/<partition>_extraction.dft_inserted_design/<partition>.icl[/dim]")
-            return
-        
-        self.console.print(f"\n[bold green]Found {len(icl_files)} ICL file(s)[/bold green]")
-        for icl_info in icl_files:
-            self.console.print(f"  • {icl_info['partition_name']}")
-        
-        # Stage 2: Generate PDL
-        self.console.print(f"\n[bold yellow]STAGE 2: Generating PDL from Requirements[/bold yellow]", justify="center")
+        # Stage 1: Generate PDL
+        self.console.print(f"[bold yellow]STAGE 1: Generating PDL from Requirements[/bold yellow]", justify="center")
         
         result = self.generate_pdl_from_requirements(test_description, icl_files)
         
@@ -1762,6 +1778,100 @@ Registers: {', '.join(icl_data.get('registers', [])[:20])}
             if 'error' in result:
                 self.console.print(f"[red]Error: {result['error']}[/red]")
             return
+        
+        # Interactive refinement loop
+        self.console.print(f"\n[bold yellow]STAGE 2: Review and Refine PDL Code[/bold yellow]", justify="center")
+        
+        from rich.console import Console
+        console = Console()
+        
+        pdl_code = result['pdl_code']
+        
+        while True:
+            # Display the generated PDL code in code block
+            self.console.print("\n[bold cyan]Generated PDL Code:[/bold cyan]")
+            self.console.print(f"```\n{pdl_code}\n```")
+            
+            # Ask user for changes
+            console.print()
+            user_changes = console.input("[bold yellow]Describe any changes needed (or press Enter to proceed with saving):[/bold yellow] ").strip()
+            
+            if not user_changes:
+                # User is satisfied, break the loop
+                self.console.print("[green]✓ Code approved by user[/green]")
+                break
+            
+            # User wants changes - regenerate PDL with feedback
+            self.console.print(f"\n[cyan]Applying changes...[/cyan]")
+            
+            # Build RAG query for PDL best practices
+            rag_query = "PDL iProc iWrite iRead iApply get_icl_instances get_icl_modules foreach_in_collection iSim macro_map dynamic register access best practices"
+            relevant_pdl_knowledge = self.get_relevant_knowledge(rag_query, top_k=12)
+            
+            # Create refinement prompt
+            refinement_prompt = f"""
+            Refine the following PDL code based on user feedback.
+            
+            CURRENT PDL CODE:
+            {pdl_code}
+            
+            USER REQUESTED CHANGES:
+            {user_changes}
+            
+            ORIGINAL IMPLEMENTATION PLAN:
+            {result.get('implementation_plan', 'N/A')}
+            
+            PDL SYNTAX EXAMPLES AND BEST PRACTICES:
+            {relevant_pdl_knowledge}
+            
+            CRITICAL REQUIREMENTS:
+            1. Maintain the TWO required PDL header lines at the top
+            2. Apply the user's requested changes accurately
+            3. Maintain PDL best practices (dynamic access, proper formatting, etc.)
+            4. Keep all working code that wasn't mentioned for changes
+            5. Use proper value formats (0x, 0b, 0d)
+            6. Preserve iNote comments and add new ones if needed
+            
+            Generate the updated PDL code incorporating the requested changes.
+            
+            Format your response EXACTLY as:
+            === PDL CODE ===
+            [Updated PDL code with user's changes applied]
+            
+            === CHANGES APPLIED ===
+            [Brief explanation of what was changed]
+            """
+            
+            try:
+                refinement_result = asyncio.run(self.pdl_generation_agent.run(refinement_prompt))
+                response = refinement_result.data
+                
+                # Parse the updated code
+                if "=== PDL CODE ===" in response:
+                    parts = response.split("=== PDL CODE ===")
+                    if len(parts) > 1:
+                        remaining = parts[1]
+                        if "=== CHANGES APPLIED ===" in remaining:
+                            code_part, changes_part = remaining.split("=== CHANGES APPLIED ===", 1)
+                            pdl_code = code_part.strip()
+                            changes_applied = changes_part.strip()
+                        else:
+                            pdl_code = remaining.strip()
+                            changes_applied = "Changes applied as requested."
+                else:
+                    pdl_code = response.strip()
+                    changes_applied = "Changes applied as requested."
+                
+                # Update the result with new code
+                result['pdl_code'] = pdl_code
+                result['tokens_used'] += refinement_result.usage().total_tokens
+                
+                self.console.print(f"[green]✓ Changes applied:[/green] {changes_applied}")
+                
+            except Exception as e:
+                self.console.print(f"[red]Error applying changes: {e}[/red]")
+                self.console.print("[yellow]Keeping previous version of code[/yellow]")
+                break
         
         # Stage 3: Save PDL
         self.console.print(f"\n[bold yellow]STAGE 3: Saving Generated PDL[/bold yellow]", justify="center")

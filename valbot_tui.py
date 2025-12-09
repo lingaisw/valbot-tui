@@ -4428,7 +4428,7 @@ Please check your configuration and try again.
         # If word doesn't start with #, return empty (no autocomplete)
         return ("", start, end)
     
-    def get_file_path_matches(self, partial_path: str, max_results: int = 20) -> list:
+    def get_file_path_matches(self, partial_path: str) -> list:
         """
         Get file/folder paths that match the partial path.
         If partial_path is empty, returns all files/folders in current directory.
@@ -4482,9 +4482,6 @@ Please check your configuration and try again.
                     completion = entry
                 
                 matches.append((display_name, completion, is_dir))
-                
-                if len(matches) >= max_results:
-                    break
             
             # Sort: directories first, then files, both alphabetically
             matches.sort(key=lambda x: (not x[2], x[0].lower()))
@@ -4515,15 +4512,8 @@ Please check your configuration and try again.
         # Get the word at cursor (only returns non-empty if starts with #)
         word, start_col, end_col = self.get_word_at_cursor(text, cursor_pos)
         
-        # Check if we have a # at start_col (word can be empty if just "#" typed)
-        row, col = cursor_pos
-        lines = text.split('\n')
-        if row >= len(lines):
-            return False
-        line = lines[row]
-        
-        # Only proceed if there's a # at start_col
-        if start_col >= len(line) or line[start_col] != '#':
+        # If word is empty, it means it doesn't start with # - no autocomplete
+        if not word:
             return False
         
         # Get matching file paths

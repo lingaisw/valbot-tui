@@ -122,7 +122,7 @@ class MyCustomPlugin(AgentPlugin):
             
             mode_value = None
             while mode_value not in ['1', '2', '3', '4']:
-                mode_value = console.input("**Select an option (1, 2, 3, or 4):** ").strip()
+                mode_value = console.input("Select an option (1, 2, 3, or 4):").strip()
                 if mode_value not in ['1', '2', '3', '4']:
                     console.print("[red]Invalid selection. Please enter 1, 2, 3, or 4.[/red]")
             
@@ -137,7 +137,7 @@ class MyCustomPlugin(AgentPlugin):
             console.print()
             console.print("[bold cyan]Generate PDL[/bold cyan]")
             console.print("[dim]Example: /nfs/site/disks/.../pchlp/ub/[/dim]\n")
-            ub_directory = console.input("**Enter the UB directory path for ICL files:** ").strip()
+            ub_directory = console.input("Enter the UB directory path for ICL files:").strip()
             
             # Immediately find and list ICL files
             console.print()
@@ -150,7 +150,7 @@ class MyCustomPlugin(AgentPlugin):
             # Now ask for test description
             console.print()
             console.print("[dim]Describe what the PDL test sequence should do...[/dim]")
-            test_description = console.input("**Describe PDL test sequence:** ").strip()
+            test_description = console.input("Describe PDL test sequence:").strip()
             return {
                 'mode': mode_value,
                 'ub_directory': ub_directory,
@@ -160,7 +160,7 @@ class MyCustomPlugin(AgentPlugin):
         elif mode_value == '3':
             # SPF to PDL conversion mode
             console.print()
-            input_path = console.input("**Enter the path to an SPF file or directory:** ").strip()
+            input_path = console.input("Enter the path to an SPF file or directory:").strip()
             return {
                 'mode': mode_value,
                 'input_path': input_path
@@ -168,7 +168,7 @@ class MyCustomPlugin(AgentPlugin):
         elif mode_value == '4':
             # ITPP to PDL conversion mode
             console.print()
-            input_path = console.input("**Enter the path to an ITPP file or directory:** ").strip()
+            input_path = console.input("Enter the path to an ITPP file or directory:").strip()
             return {
                 'mode': mode_value,
                 'input_path': input_path
@@ -1796,7 +1796,7 @@ Registers: {', '.join(icl_data.get('registers', [])[:20])}
             
             # Ask user for changes
             console.print()
-            user_changes = console.input("**Describe any changes needed (or press Enter to proceed with saving):** ").strip()
+            user_changes = console.input("Describe any changes needed (or press Enter to proceed with saving):").strip()
             
             if not user_changes:
                 # User is satisfied, break the loop
@@ -1882,7 +1882,7 @@ Registers: {', '.join(icl_data.get('registers', [])[:20])}
         from rich.console import Console
         console = Console()
         console.print()
-        output_filename = console.input("**Enter output filename (default: generated_test.pdl):** ").strip()
+        output_filename = console.input("Enter output filename (default: generated_test.pdl):").strip()
         if not output_filename:
             output_filename = "generated_test.pdl"
         elif not output_filename.endswith('.pdl'):

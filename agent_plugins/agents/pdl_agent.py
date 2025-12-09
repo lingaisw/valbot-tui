@@ -150,6 +150,7 @@ class MyCustomPlugin(AgentPlugin):
             # Now ask for test description
             console.print()
             console.print("[dim]Describe what the PDL test sequence should do...[/dim]")
+            console.print("[dim]Tip: Reference files with #filepath (e.g., #test_spec.txt)[/dim]")
             test_description = console.input("Describe PDL test sequence:").strip()
             return {
                 'mode': mode_value,
@@ -1523,6 +1524,125 @@ class MyCustomPlugin(AgentPlugin):
             self.console.print(f"[red]Error reading {icl_path}: {e}[/red]")
             return None
     
+    def _enhance_description_with_file_content(self, test_description: str) -> str:
+        """
+        Detect file references in test description using #filepath syntax and read their content.
+        Similar to valbot_tui.py's file reference handling.
+        
+        Supports:
+        - #filepath or #/absolute/path (hashtag prefix for file paths)
+        - Validates that files exist before reading
+        - Reads text, PDF, and DOCX files
+        
+        Args:
+            test_description: Original test description
+            
+        Returns:
+            Enhanced description with file content included
+        """
+        import re
+        from pathlib import Path
+        
+        # Find all #filepath patterns (similar to valbot_tui.py)
+        # Match # followed by non-whitespace characters (file path)
+        file_pattern = r'#([^\s]+)'
+        matches = re.findall(file_pattern, test_description)
+        
+        if not matches:
+            return test_description
+        
+        enhanced_parts = [test_description, "\n\n=== REFERENCED FILE CONTENT ===\n"]
+        files_read = 0
+        
+        for file_ref in matches:
+            # Validate and resolve the file path
+            try:
+                file_path = Path(file_ref).expanduser()
+                
+                # If not absolute, try relative to current directory
+                if not file_path.is_absolute():
+                    file_path = Path.cwd() / file_ref
+                
+                # Check if file exists
+                if not file_path.exists():
+                    self.console.print(f"  [dim]Skipping non-existent file: #{file_ref}[/dim]")
+                    continue
+                
+                if not file_path.is_file():
+                    self.console.print(f"  [dim]Skipping non-file path: #{file_ref}[/dim]")
+                    continue
+                
+                # Read file based on type
+                suffix = file_path.suffix.lower()
+                
+                # Check file size before reading (10 MB limit)
+                file_size = file_path.stat().st_size
+                max_size_bytes = 10 * 1024 * 1024  # 10 MB
+                
+                if file_size > max_size_bytes:
+                    self.console.print(f"  [yellow]⚠[/yellow] File too large to include: {file_path.name} ({file_size / (1024*1024):.2f} MB)")
+                    continue
+                
+                if suffix in ['.txt', '.spf', '.pdl', '.itpp', '.log', '.md', '.py', '.c', '.cpp', '.h', '.hpp', '.java', '.js', '.json', '.xml', '.yaml', '.yml']:
+                    # Read as text
+                    with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                        content = f.read()
+                    
+                    enhanced_parts.append(f"\n--- File: {file_path.name} (from #{file_ref}) ---\n")
+                    enhanced_parts.append(content)
+                    enhanced_parts.append(f"\n--- End of {file_path.name} ---\n")
+                    files_read += 1
+                    self.console.print(f"  [green]✓[/green] Read file: {file_path.name} ({file_size / 1024:.2f} KB)")
+                
+                elif suffix == '.pdf':
+                    # Read PDF (first 20 pages)
+                    if PyPDF2 is None:
+                        self.console.print(f"  [yellow]⚠[/yellow] PyPDF2 not installed, cannot read {file_path.name}")
+                        continue
+                    
+                    try:
+                        with open(file_path, 'rb') as f:
+                            pdf_reader = PyPDF2.PdfReader(f)
+                            text_parts = []
+                            num_pages = min(len(pdf_reader.pages), 20)
+                            for page in pdf_reader.pages[:num_pages]:
+                                text_parts.append(page.extract_text())
+                            content = "\n".join(text_parts)
+                        
+                        enhanced_parts.append(f"\n--- File: {file_path.name} (PDF, {num_pages} pages, from #{file_ref}) ---\n")
+                        enhanced_parts.append(content)
+                        enhanced_parts.append(f"\n--- End of {file_path.name} ---\n")
+                        files_read += 1
+                        self.console.print(f"  [green]✓[/green] Read PDF: {file_path.name} ({num_pages} pages)")
+                    except Exception as e:
+                        self.console.print(f"  [yellow]⚠[/yellow] Could not read PDF {file_path.name}: {e}")
+                
+                elif suffix == '.docx':
+                    # Read DOCX
+                    try:
+                        doc = Document(file_path)
+                        content = "\n".join([para.text for para in doc.paragraphs])
+                        
+                        enhanced_parts.append(f"\n--- File: {file_path.name} (DOCX, from #{file_ref}) ---\n")
+                        enhanced_parts.append(content)
+                        enhanced_parts.append(f"\n--- End of {file_path.name} ---\n")
+                        files_read += 1
+                        self.console.print(f"  [green]✓[/green] Read DOCX: {file_path.name}")
+                    except Exception as e:
+                        self.console.print(f"  [yellow]⚠[/yellow] Could not read DOCX {file_path.name}: {e}")
+                
+                else:
+                    self.console.print(f"  [dim]Unsupported file type: {file_path.name} ({suffix})[/dim]")
+                    
+            except Exception as e:
+                self.console.print(f"  [yellow]⚠[/yellow] Error processing #{file_ref}: {e}")
+        
+        if files_read > 0:
+            self.console.print(f"  [cyan]Files referenced:[/cyan] {files_read}")
+            return "".join(enhanced_parts)
+        else:
+            return test_description
+    
     def generate_pdl_from_requirements(
         self, 
         test_description: str, 
@@ -1540,6 +1660,9 @@ class MyCustomPlugin(AgentPlugin):
         """
         try:
             self.console.print(f"\n[cyan]Stage 1a:[/cyan] Analyzing ICL files and requirements...")
+            
+            # Check if test_description references any files and read them
+            enhanced_description = self._enhance_description_with_file_content(test_description)
             
             # Read ICL files to understand available modules and registers
             icl_context = []
@@ -1565,7 +1688,7 @@ Registers: {', '.join(icl_data.get('registers', [])[:20])}
             Analyze the following test requirements and available ICL resources.
             
             TEST REQUIREMENTS:
-            {test_description}
+            {enhanced_description}
             
             AVAILABLE ICL RESOURCES (Partitions, Modules, Registers):
             {icl_context_str}

@@ -108,7 +108,6 @@ class MyCustomPlugin(AgentPlugin):
         except Exception as e:
             # Fallback to simple input if readchar doesn't work
             # console.print(f"[yellow]Arrow key navigation not available: {e}[/yellow]")
-            console.print("\n[bold cyan]SPF to PDL Converter Agent[/bold cyan]")
             console.print("[dim]Select a mode to continue[/dim]\n")
             
             table = Table(show_header=False, box=box.ROUNDED, padding=(0, 2))
@@ -122,7 +121,7 @@ class MyCustomPlugin(AgentPlugin):
             
             mode_value = None
             while mode_value not in ['1', '2', '3', '4']:
-                mode_value = console.input("Select an option (1, 2, 3, or 4):").strip()
+                mode_value = console.input("Select an option:").strip()
                 if mode_value not in ['1', '2', '3', '4']:
                     console.print("[red]Invalid selection. Please enter 1, 2, 3, or 4.[/red]")
             

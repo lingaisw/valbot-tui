@@ -68,9 +68,9 @@ class MyCustomPlugin(AgentPlugin):
         
         console = Console()
         
-        # Menu choices - reordered with Generate PDL as option 2
+        # Menu choices
         choices = [
-            ("1", "PDL Expert Consultation (interactive Q&A)"),
+            ("1", "Chat with PDL Expert"),
             ("2", "Generate PDL"),
             ("3", "Convert SPF to PDL"),
             ("4", "Convert ITPP to PDL")
@@ -1523,115 +1523,6 @@ class MyCustomPlugin(AgentPlugin):
             self.console.print(f"[red]Error reading {icl_path}: {e}[/red]")
             return None
     
-    def _enhance_description_with_file_content(self, test_description: str) -> str:
-        """
-        Detect file references in test description and read their content.
-        Checks if any word contains "." and is a valid file path.
-        
-        Args:
-            test_description: Original test description
-            
-        Returns:
-            Enhanced description with file content included
-        """
-        from pathlib import Path
-        
-        # Unsupported file types that should be skipped
-        unsupported_extensions = {'.xlsx', '.xls', '.csv', '.db', '.sqlite', '.exe', '.dll', '.so', '.bin'}
-        
-        # Find all words that contain a "." which might be file paths
-        words = test_description.split()
-        potential_files = [word.strip('.,;:()[]{}"\'"') for word in words if '.' in word]
-        
-        # Remove duplicates
-        potential_files = list(set(potential_files))
-        
-        enhanced_parts = [test_description]
-        files_read = 0
-        files_section_added = False
-        
-        for file_ref in potential_files:
-            file_path = Path(file_ref).expanduser()
-            
-            # Try relative to current directory if not absolute
-            if not file_path.is_absolute():
-                file_path = Path.cwd() / file_ref
-            
-            # Check if it's a valid file that exists
-            if not file_path.exists() or not file_path.is_file():
-                continue
-            
-            # Get file extension
-            suffix = file_path.suffix.lower()
-            
-            # Skip unsupported file types
-            if suffix in unsupported_extensions:
-                self.console.print(f"  [yellow]⚠[/yellow] Skipping unsupported file type: {file_path.name}")
-                continue
-            
-            # Add files section header once
-            if not files_section_added:
-                enhanced_parts.append("\n\n=== REFERENCED FILE CONTENT ===\n")
-                files_section_added = True
-            
-            try:
-                # Handle PDF files specially
-                if suffix == '.pdf':
-                    try:
-                        with open(file_path, 'rb') as f:
-                            pdf_reader = PyPDF2.PdfReader(f)
-                            text_parts = []
-                            for page in pdf_reader.pages[:20]:  # Limit to first 20 pages
-                                text_parts.append(page.extract_text())
-                            content = "\n".join(text_parts)
-                        
-                        enhanced_parts.append(f"\n--- File: {file_path.name} (PDF) ---\n")
-                        enhanced_parts.append(content)
-                        enhanced_parts.append(f"\n--- End of {file_path.name} ---\n")
-                        files_read += 1
-                        self.console.print(f"  [green]✓[/green] Read referenced PDF: {file_path.name}")
-                    except Exception as e:
-                        self.console.print(f"  [yellow]⚠[/yellow] Could not read PDF {file_path.name}: {e}")
-                
-                # Handle DOCX files specially
-                elif suffix == '.docx':
-                    try:
-                        doc = Document(file_path)
-                        content = "\n".join([para.text for para in doc.paragraphs])
-                        
-                        enhanced_parts.append(f"\n--- File: {file_path.name} (DOCX) ---\n")
-                        enhanced_parts.append(content)
-                        enhanced_parts.append(f"\n--- End of {file_path.name} ---\n")
-                        files_read += 1
-                        self.console.print(f"  [green]✓[/green] Read referenced DOCX: {file_path.name}")
-                    except Exception as e:
-                        self.console.print(f"  [yellow]⚠[/yellow] Could not read DOCX {file_path.name}: {e}")
-                
-                # Handle all other files as text using read_file tool
-                else:
-                    try:
-                        file_content = read_file(str(file_path))
-                        if file_content and file_content.content:
-                            content = file_content.content
-                            
-                            enhanced_parts.append(f"\n--- File: {file_path.name} ---\n")
-                            enhanced_parts.append(content)
-                            enhanced_parts.append(f"\n--- End of {file_path.name} ---\n")
-                            files_read += 1
-                            self.console.print(f"  [green]✓[/green] Read referenced file: {file_path.name}")
-                        else:
-                            self.console.print(f"  [yellow]⚠[/yellow] Empty content from {file_path.name}")
-                    except Exception as e:
-                        self.console.print(f"  [yellow]⚠[/yellow] Could not read {file_path.name}: {e}")
-            
-            except Exception as e:
-                self.console.print(f"  [yellow]⚠[/yellow] Error reading {file_ref}: {e}")
-        
-        if files_read > 0:
-            return "".join(enhanced_parts)
-        else:
-            return test_description
-    
     def generate_pdl_from_requirements(
         self, 
         test_description: str, 
@@ -1649,9 +1540,6 @@ class MyCustomPlugin(AgentPlugin):
         """
         try:
             self.console.print(f"\n[cyan]Stage 1a:[/cyan] Analyzing ICL files and requirements...")
-            
-            # Check if test_description references any files and read them
-            enhanced_description = self._enhance_description_with_file_content(test_description)
             
             # Read ICL files to understand available modules and registers
             icl_context = []
@@ -1677,7 +1565,7 @@ Registers: {', '.join(icl_data.get('registers', [])[:20])}
             Analyze the following test requirements and available ICL resources.
             
             TEST REQUIREMENTS:
-            {enhanced_description}
+            {test_description}
             
             AVAILABLE ICL RESOURCES (Partitions, Modules, Registers):
             {icl_context_str}

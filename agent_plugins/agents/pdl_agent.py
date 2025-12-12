@@ -1765,9 +1765,9 @@ Registers: {', '.join(icl_data.get('registers', [])[:20])}
         
         # Display header
         self.console.rule("[bold blue]PDL Generation[/bold blue]", style="blue")
-        self.console.print(f"\n[bold cyan]UB Directory:[/bold cyan] {ub_directory}")
-        self.console.print(f"[bold cyan]Test Requirements:[/bold cyan] {test_description}")
-        self.console.print(f"[bold cyan]ICL Files:[/bold cyan] {len(icl_files)} partition(s)\n")
+        # self.console.print(f"\n[bold cyan]UB Directory:[/bold cyan] {ub_directory}")
+        # self.console.print(f"[bold cyan]Test Requirements:[/bold cyan] {test_description}")
+        # self.console.print(f"[bold cyan]ICL Files:[/bold cyan] {len(icl_files)} partition(s)\n")
         
         # Stage 1: Generate PDL
         self.console.print(f"[bold yellow]STAGE 1: Generating PDL[/bold yellow]", justify="center")
